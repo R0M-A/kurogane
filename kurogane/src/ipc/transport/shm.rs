@@ -84,6 +84,13 @@ impl SharedBuffer {
 
     /// Copy data into the shared memory.
     pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
+        if data.len() > u32::MAX as usize {
+            return Err(format!(
+                "payload exceeds u32 header capacity: {}",
+                data.len()
+            ));
+        }
+
         if SHM_HEADER_SIZE + data.len() > self.size {
             return Err(format!(
                 "SHM overflow: payload={} total_capacity={}",
@@ -97,8 +104,8 @@ impl SharedBuffer {
             let slice = std::slice::from_raw_parts_mut(ptr, self.size);
 
             // Write header
-            let len_bytes = (data.len() as u32).to_le_bytes();
-            slice[0..4].copy_from_slice(&len_bytes);
+            let len = data.len() as u32;
+            slice[0..4].copy_from_slice(&len.to_le_bytes());
 
             // Write payload
             slice[4..4 + data.len()].copy_from_slice(data);
