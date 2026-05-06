@@ -91,29 +91,43 @@ impl SharedBuffer {
     }
 
     /// Read payload safely (validated via header)
-    pub fn read(&self) -> Result<&[u8], String> {
+    pub fn with_read<R>(
+        &self,
+        f: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, String> {
+        if self.size < SHM_HEADER_SIZE {
+            return Err("SHM too small for header".into());
+        }
+
         unsafe {
             let ptr = self.shmem.as_ptr();
-            let slice = std::slice::from_raw_parts(ptr, self.size);
 
-            if slice.len() < SHM_HEADER_SIZE {
-                return Err("SHM too small for header".into());
-            }
+            std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
 
             let mut len_bytes = [0u8; 4];
-            len_bytes.copy_from_slice(&slice[0..4]);
+
+            std::ptr::copy_nonoverlapping(
+                ptr,
+                len_bytes.as_mut_ptr(),
+                SHM_HEADER_SIZE,
+            );
 
             let payload_len = u32::from_le_bytes(len_bytes) as usize;
 
-            if payload_len > slice.len() - SHM_HEADER_SIZE {
+            if payload_len > self.size - SHM_HEADER_SIZE {
                 return Err(format!(
                     "Corrupted SHM: payload_len={} > available={}",
                     payload_len,
-                    slice.len() - SHM_HEADER_SIZE
+                    self.size - SHM_HEADER_SIZE
                 ));
             }
 
-            Ok(&slice[4..4 + payload_len])
+            let payload_ptr = ptr.add(SHM_HEADER_SIZE);
+
+            let payload =
+                std::slice::from_raw_parts(payload_ptr, payload_len);
+
+            Ok(f(payload))
         }
     }
 }

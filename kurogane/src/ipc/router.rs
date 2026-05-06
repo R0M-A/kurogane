@@ -54,16 +54,17 @@ pub fn route_browser(
                 let size = list_get_int(args, 4) as usize;
 
                 let shm = crate::ipc::transport::shm::SharedBuffer::open(&name, size)?;
-                let data = shm.read()?;
 
-                debug!(
-                    "[IPC Browser] binary invoke (SHM): '{}' (id={}, {} bytes)",
-                    command,
-                    id,
-                    data.len()
-                );
+                shm.with_read(|data| {
+                    debug!(
+                        "[IPC Browser] binary invoke (SHM): '{}' (id={}, {} bytes)",
+                        command,
+                        id,
+                        data.len()
+                    );
 
-                binary::handle_invoke(frame, id, command, data);
+                    binary::handle_invoke(frame, id, command, data);
+                })?;
 
                 Ok(())
             })();

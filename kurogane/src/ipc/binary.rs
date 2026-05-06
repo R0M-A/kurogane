@@ -150,20 +150,20 @@ pub fn handle_response(
             }
         };
 
-        let payload = match shm.read() {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[IPC] SHM read failed: {}", e);
+        let result = shm.with_read(|payload| {
+            resolve_binary(id, payload);
+        });
 
-                let msg = CefString::from(format!("shm transport error: {}", e).as_str());
-                crate::ipc::rpc::resolve_cef_string(id, false, &msg);
+        if let Err(e) = result {
+            eprintln!("[IPC] SHM read failed: {}", e);
 
-                send_shm_free(frame, id);
-                return;
-            }
-        };
+            let msg = CefString::from(format!("shm transport error: {}", e).as_str());
 
-        resolve_binary(id, payload);
+            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
+
+            send_shm_free(frame, id);
+            return;
+        }
 
         // Notify browser it can release the SHM buffer
         send_shm_free(frame, id);
