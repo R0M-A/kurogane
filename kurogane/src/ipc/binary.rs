@@ -133,7 +133,27 @@ pub fn handle_response(
     } else {
         // Browser used SHM for this response
         let name: CefString = (&args.string(2)).into();
-        let size = args.int(3) as usize;
+        let raw_size = args.int(3);
+
+        if raw_size <= 0 {
+            let msg = CefString::from("invalid shm size");
+
+            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
+
+            send_shm_free(frame, id);
+            return;
+        }
+
+        let size = raw_size as usize;
+
+        if size > crate::ipc::transport::shm::MAX_SHM_SIZE {
+            let msg = CefString::from("shm size exceeds limit");
+
+            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
+
+            send_shm_free(frame, id);
+            return;
+        }
 
         // Pass SHM slice directly; V8 performs the copy internally
         // V8 copies the data during resolve; SHM must remain valid until then

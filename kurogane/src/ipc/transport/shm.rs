@@ -6,6 +6,7 @@ use shared_memory::{Shmem, ShmemConf};
 pub const SHM_THRESHOLD: usize = 3 * 1024 * 1024; // 3MB
 
 pub const SHM_HEADER_SIZE: usize = 4;
+pub const MAX_SHM_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
 pub struct SharedBuffer {
     shmem: Shmem,

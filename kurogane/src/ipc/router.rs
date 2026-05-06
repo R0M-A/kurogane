@@ -51,7 +51,24 @@ pub fn route_browser(
             // Handle SHM buffer reading for large payloads
             let result: Result<(), String> = (|| {
                 let name = list_get_string(args, 3);
-                let size = list_get_int(args, 4) as usize;
+                let raw_size = list_get_int(args, 4);
+
+                if raw_size <= 0 {
+                    return Err(format!(
+                        "invalid SHM size: {}",
+                        raw_size
+                    ));
+                }
+
+                let size = raw_size as usize;
+
+                if size > crate::ipc::transport::shm::MAX_SHM_SIZE {
+                    return Err(format!(
+                        "SHM exceeds limit: {} > {}",
+                        size,
+                        crate::ipc::transport::shm::MAX_SHM_SIZE
+                    ));
+                }
 
                 let shm = crate::ipc::transport::shm::SharedBuffer::open(&name, size)?;
 
