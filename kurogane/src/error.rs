@@ -6,6 +6,7 @@ pub enum RuntimeError {
     AssetRootMissing(std::path::PathBuf),
     CefInitializeFailed,
     CefNotInstalled,
+    InvalidCefInstallation(String),
 }
 
 impl Display for RuntimeError {
@@ -38,7 +39,7 @@ impl Display for RuntimeError {
             RuntimeError::CefInitializeFailed => write!(
                 f,
                 concat!(
-                    "Chromium Embedded Framework failed to initialize.\n\n",
+                    "Chromium failed to initialize.\n\n",
                     "This usually means required CEF resources are missing next to the executable."
                 )
             ),
@@ -46,11 +47,23 @@ impl Display for RuntimeError {
             RuntimeError::CefNotInstalled => write!(
                 f,
                 concat!(
-                    "Chromium Embedded Framework is not installed.\n\n",
+                    "Chromium is not installed.\n\n",
                     "Install it with:\n\n",
                     "  kurogane install\n\n",
                     "Then run your application again."
                 )
+            ),
+
+            RuntimeError::InvalidCefInstallation(reason) => write!(
+                f,
+                concat!(
+                    "Chromium installation is invalid.\n\n",
+                    "Reason:\n",
+                    "  {}\n\n",
+                    "Try reinstalling Chromium:\n\n",
+                    "  kurogane install"
+                ),
+                reason
             ),
         }
     }

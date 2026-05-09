@@ -1,11 +1,11 @@
 use cef::{args::Args, *};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::path::PathBuf;
 
 use crate::cef_app::DemoApp;
 use crate::error::RuntimeError;
-use crate::scheme::{CanonicalRoot, fnv1a_64, sanitize_name};
+use crate::scheme::CanonicalRoot;
+use kurogane_layout::{detect_cef_root, validate_cef_root, profile_dir};
 
 /// Public entry point for launching a CEF application.
 ///
@@ -72,37 +72,33 @@ impl Runtime {
             std::process::exit(exit_code);
         }
 
+        // Isolate the CEF cache per executable.
+        // Reusing a profile across runs can trigger session restore leading to multiple on_context_initialized invocations.
         let exe = std::env::current_exe()
             .expect("failed to get current exe path");
         let exe_str = exe.to_string_lossy();
 
-        // Isolate the CEF cache per executable.
-        // Reusing a profile across runs can trigger session restore leading to multiple on_context_initialized invocations.
-        let exe_canonical = exe
-            .canonicalize()
-            .unwrap_or(exe.clone());
-
-        let exe_hash = fnv1a_64(&exe_canonical);
-
-
         let raw_name = profile_id
             .unwrap_or_else(|| "kurogane-app".to_string());
 
-        let profile_name = sanitize_name(&raw_name);
-
-        let profile_dir_name = format!("{}-{}", profile_name, exe_hash);
-
-        let base_dir = dirs::cache_dir()
-            .unwrap_or_else(|| std::env::temp_dir());
-
-        let cache_dir = base_dir
-            .join("kurogane")
-            .join("profiles")
-            .join(profile_dir_name);
+        let cache_dir = profile_dir(
+            &raw_name,
+            &exe,
+        );
 
         std::fs::create_dir_all(&cache_dir).ok();
 
-        let cef_root = find_cef_root()?
+        let detected = detect_cef_root()
+            .map_err(|_| RuntimeError::CefNotInstalled)?;
+
+        validate_cef_root(&detected.root)
+            .map_err(|e| {
+                RuntimeError::InvalidCefInstallation(
+                    e.to_string()
+                )
+            })?;
+
+        let cef_root = detected.root
             .canonicalize()
             .map_err(|_| RuntimeError::CefNotInstalled)?;
 
@@ -181,40 +177,4 @@ impl Runtime {
         shutdown();
         Ok(())
     }
-}
-
-fn find_cef_root() -> Result<PathBuf, RuntimeError> {
-    use std::env;
-
-    // Dev environment
-    if let Ok(path) = env::var("CEF_PATH") {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-
-    // Next to executable (production)
-    if let Ok(exe) = env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            #[cfg(target_os = "windows")]
-            {
-                // Windows bundle: CEF is flattened next to the exe.
-                if dir.join("libcef.dll").exists() {
-                    return Ok(dir.to_path_buf());
-                }
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                // Linux: CEF lives in a cef/ subdirectory.
-                let candidate = dir.join("cef");
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-
-    Err(RuntimeError::CefNotInstalled)
 }
