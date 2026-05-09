@@ -41,6 +41,12 @@ wrap_app! {
                 );
             }
 
+            #[cfg(feature = "debug")]
+            cmd.append_switch_with_value(
+                Some(&CefString::from("js-flags")),
+                Some(&CefString::from("--expose-gc")),
+            );
+
             #[cfg(target_os = "windows")]
             {
                 // Sandbox disable
