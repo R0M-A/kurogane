@@ -787,6 +787,7 @@ dependencies = [
  "cef",
  "ctrlc",
  "dirs",
+ "kurogane-layout",
  "mime_guess",
  "percent-encoding",
  "proptest",
@@ -808,10 +809,19 @@ dependencies = [
  "dirs",
  "download-cef 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "include_dir",
+ "kurogane-layout",
  "semver",
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "kurogane-layout"
+version = "0.0.1"
+dependencies = [
+ "dirs",
+ "thiserror",
 ]
 
 [[package]]

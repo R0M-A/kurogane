@@ -1,0 +1,8 @@
+[package]
+name = "kurogane-layout"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+dirs = "6"
+thiserror = "2.0.18"
