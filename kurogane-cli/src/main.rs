@@ -62,7 +62,10 @@ enum Commands {
         #[arg(long)]
         template: Option<String>,
     },
-    Clean,
+    Clean {
+        #[arg(value_parser = ["all"])]
+        target: Option<String>,
+    },
     Showcase,
     Doctor {
         #[arg(long)]
@@ -89,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Build => build::run(),
         Commands::Bundle { debug } => bundle::run(debug),
         Commands::Init { name, template } => init::run(name, template),
-        Commands::Clean => clean::run(),
+        Commands::Clean { target } => clean::run(target),
         Commands::Showcase => showcase::run(),
         Commands::Doctor { json } => doctor::run(json),
         Commands::List { target } => list::run(target),
