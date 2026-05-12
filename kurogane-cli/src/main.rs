@@ -28,28 +28,13 @@ struct Cli {
 enum Commands {
     Install,
     Dev {
-        /// Arguments passed directly to Cargo.
-        ///
-        /// Example:
-        ///   kurogane dev --release
         #[arg(
             num_args = 0..,
-            allow_hyphen_values = true,
-            value_parser = clap::value_parser!(OsString)
-        )]
-        cargo_args: Vec<OsString>,
-
-        /// Arguments passed to the application after "--".
-        ///
-        /// Example:
-        ///   kurogane dev -- --port 3000
-        #[arg(
-            last = true,
             trailing_var_arg = true,
             allow_hyphen_values = true,
             value_parser = clap::value_parser!(OsString)
         )]
-        app_args: Vec<OsString>,
+        cargo_args: Vec<OsString>,
     },
     Build,
     Bundle {
@@ -85,10 +70,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Install => install::run(),
-        Commands::Dev {
-            cargo_args,
-            app_args,
-        } => dev::run(cargo_args, app_args),
+        Commands::Dev { cargo_args } => dev::run(cargo_args),
         Commands::Build => build::run(),
         Commands::Bundle { debug } => bundle::run(debug),
         Commands::Init { name, template } => init::run(name, template),

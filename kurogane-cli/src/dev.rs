@@ -5,10 +5,7 @@ use kurogane_layout::cef_install_dir;
 
 use crate::tui;
 
-pub fn run(
-    cargo_args: Vec<OsString>,
-    app_args: Vec<OsString>,
-) -> Result<()> {
+pub fn run(cargo_args: Vec<OsString>) -> Result<()> {
     tui::section("Kurogane Dev");
 
     let version = env!("KUROGANE_CEF_VERSION");
@@ -31,14 +28,6 @@ pub fn run(
 
     for arg in cargo_args {
         cmd.arg(arg);
-    }
-
-    if !app_args.is_empty() {
-        cmd.arg("--");
-
-        for arg in app_args {
-            cmd.arg(arg);
-        }
     }
 
     cmd.env("CEF_PATH", &cef);
