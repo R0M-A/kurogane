@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 dirs = "6"
 thiserror = "2.0.18"
+
+[dev-dependencies]
+proptest = "1"

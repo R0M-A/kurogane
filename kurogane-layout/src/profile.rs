@@ -95,3 +95,33 @@ pub fn sanitize_name(name: &str) -> String {
 
     sanitized
 }
+
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn sanitize_name_never_panics(s in ".*") {
+            // never panics on any input
+            let _ = sanitize_name(&s);
+        }
+
+        #[test]
+        fn sanitize_name_output_is_valid_utf8(s in ".*") {
+            let result = sanitize_name(&s);
+            prop_assert!(result.chars().count() <= 64);
+            assert!(!result.is_empty());
+        }
+
+        #[test]
+        fn sanitize_name_no_forbidden_chars(s in ".*") {
+            let result = sanitize_name(&s);
+            for c in result.chars() {
+                prop_assert!(!matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'));
+            }
+        }
+    }
+}
