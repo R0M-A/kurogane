@@ -98,6 +98,7 @@
             ++ [ kurogane-cli ];
 
           shellHook = ''
+            export KUROGANE_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeDeps}"
 
             export PKG_CONFIG_PATH="${
               pkgs.lib.makeSearchPath "lib/pkgconfig" runtimeDeps
