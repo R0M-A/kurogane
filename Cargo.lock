@@ -820,6 +820,7 @@ dependencies = [
 name = "kurogane-layout"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "dirs",
  "proptest",
  "thiserror",
