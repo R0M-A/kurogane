@@ -25,6 +25,7 @@ pub mod logger;
 mod platform;
 
 pub use runtime::Runtime;
+pub use gpu::GpuMode;
 pub use error::RuntimeError;
 pub use app::App;
 
