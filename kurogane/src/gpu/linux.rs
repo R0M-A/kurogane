@@ -48,7 +48,7 @@ fn detect_display_server() -> DisplayServer {
     }
 }
 
-fn detect_gpu_vendor() -> bool {
+fn detect_gpu_vendor() -> GpuVendor {
     // Primary: PCI device list (vendor ID 10de = NVIDIA)
     if let Ok(s) = std::fs::read_to_string("/proc/bus/pci/devices") {
         if s.contains("10de") {
