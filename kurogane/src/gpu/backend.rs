@@ -30,6 +30,13 @@ pub enum GpuMode {
     Disabled,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedGpuMode {
+    Hardware,
+    Software,
+    Disabled,
+}
+
 /// Apply Chromium command-line flags for the configured GPU mode
 pub(crate) fn apply(
     cmd: &mut CommandLine,
@@ -40,28 +47,32 @@ pub(crate) fn apply(
     let mode = resolve(requested, &env);
 
     match mode {
-        GpuMode::Hardware => platform::apply_hardware(cmd),
-        GpuMode::Software => apply_software(cmd),
-        GpuMode::Disabled => apply_disabled(cmd),
-        GpuMode::Auto => unreachable!(),
+        ResolvedGpuMode::Hardware => platform::apply_hardware(cmd),
+        ResolvedGpuMode::Software => apply_software(cmd),
+        ResolvedGpuMode::Disabled => apply_disabled(cmd),
     }
 }
 
 fn resolve(
     requested: GpuMode,
     env: &RenderingEnvironment,
-) -> GpuMode {
+) -> ResolvedGpuMode {
     match requested {
-        GpuMode::Auto => default_mode(env),
-        other => other,
+        GpuMode::Auto => resolve_auto(env),
+
+        GpuMode::Hardware => ResolvedGpuMode::Hardware,
+
+        GpuMode::Software => ResolvedGpuMode::Software,
+
+        GpuMode::Disabled => ResolvedGpuMode::Disabled,
     }
 }
 
-fn default_mode(env: &RenderingEnvironment) -> GpuMode {
+fn resolve_auto(env: &RenderingEnvironment) -> ResolvedGpuMode {
     if env.is_virtual_gpu {
-        GpuMode::Software
+        ResolvedGpuMode::Software
     } else {
-        GpuMode::Hardware
+        ResolvedGpuMode::Hardware
     }
 }
 
