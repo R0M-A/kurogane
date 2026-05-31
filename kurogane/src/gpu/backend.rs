@@ -76,22 +76,21 @@ fn resolve_auto(env: &RenderingEnvironment) -> ResolvedGpuMode {
     }
 }
 
-fn gpu_off(cmd: &mut CommandLine) {
-    cmd.append_switch(Some(&CefString::from("disable-gpu")));
-    cmd.append_switch(Some(&CefString::from("disable-gpu-compositing")));
-}
-
 fn apply_software(cmd: &mut CommandLine) {
-    gpu_off(cmd);
-
     cmd.append_switch_with_value(
         Some(&CefString::from("use-gl")),
+        Some(&CefString::from("angle")),
+    );
+
+    cmd.append_switch_with_value(
+        Some(&CefString::from("use-angle")),
         Some(&CefString::from("swiftshader")),
     );
 }
 
 fn apply_disabled(cmd: &mut CommandLine) {
-    gpu_off(cmd);
+    cmd.append_switch(Some(&CefString::from("disable-gpu")));
+    cmd.append_switch(Some(&CefString::from("disable-gpu-compositing")));
 
     cmd.append_switch(Some(&CefString::from("disable-software-rasterizer")));
 }
