@@ -3,14 +3,14 @@
 #[derive(Debug)]
 pub(crate) struct RenderingEnvironment {
     /// True when the GPU appears to be a virtual device (VirtualBox, VMware, QEMU etc.)
-    pub is_virtual_gpu: bool,
+    pub virtualization: bool,
 }
 
 impl RenderingEnvironment {
     /// Detect the current GPU environment
     pub(crate) fn detect() -> Self {
         Self {
-            is_virtual_gpu: detect_virtual_gpu(), // TODO: optimize for wsl
+            virtualization: detect_virtual_gpu(), // TODO: optimize for wsl
         }
     }
 }

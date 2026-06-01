@@ -62,7 +62,7 @@ fn resolve(requested: GpuMode, env: &RenderingEnvironment) -> ResolvedGpuMode {
 }
 
 fn resolve_auto(env: &RenderingEnvironment) -> ResolvedGpuMode {
-    if env.is_virtual_gpu {
+    if env.virtualization {
         ResolvedGpuMode::Software
     } else {
         ResolvedGpuMode::Hardware
@@ -78,4 +78,87 @@ fn apply_disabled(flags: &mut ChromiumFlags) {
     flags.set("disable-gpu");
     flags.set("disable-gpu-compositing");
     flags.set("disable-software-rasterizer");
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Tests for GPU policy resolution independent of environment detection
+
+    #[test]
+    fn auto_uses_hardware_for_real_gpu() {
+        let env = RenderingEnvironment {
+            virtualization: false,
+        };
+
+        assert_eq!(
+            resolve(
+                GpuMode::Auto,
+                &env,
+            ),
+            ResolvedGpuMode::Hardware,
+        );
+    }
+
+    #[test]
+    fn auto_uses_software_for_virtual_gpu() {
+        let env = RenderingEnvironment {
+            virtualization: true,
+        };
+
+        assert_eq!(
+            resolve(
+                GpuMode::Auto,
+                &env,
+            ),
+            ResolvedGpuMode::Software,
+        );
+    }
+
+    #[test]
+    fn explicit_hardware_overrides_environment() {
+        let env = RenderingEnvironment {
+            virtualization: true,
+        };
+
+        assert_eq!(
+            resolve(
+                GpuMode::Hardware,
+                &env,
+            ),
+            ResolvedGpuMode::Hardware,
+        );
+    }
+
+    #[test]
+    fn explicit_software_overrides_environment() {
+        let env = RenderingEnvironment {
+            virtualization: false,
+        };
+
+        assert_eq!(
+            resolve(
+                GpuMode::Software,
+                &env,
+            ),
+            ResolvedGpuMode::Software,
+        );
+    }
+
+    #[test]
+    fn disabled_always_disables_gpu() {
+        let env = RenderingEnvironment {
+            virtualization: false,
+        };
+
+        assert_eq!(
+            resolve(
+                GpuMode::Disabled,
+                &env,
+            ),
+            ResolvedGpuMode::Disabled,
+        );
+    }
 }
