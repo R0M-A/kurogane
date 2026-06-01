@@ -59,7 +59,7 @@ wrap_app! {
             // Apply user overrides
             flags.extend_user_flags(&self.chromium_flags);
 
-            debug!("Chromium flags: {:?}", flags);
+            debug!("Chromium startup flags:\n{}", flags);
 
             flags.apply(cmd);
         }

@@ -75,3 +75,24 @@ impl ChromiumFlags {
         }
     }
 }
+
+impl std::fmt::Display for ChromiumFlags {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        for (name, value) in &self.switches {
+            match value {
+                SwitchValue::Present => {
+                    writeln!(f, "--{name}")?;
+                }
+
+                SwitchValue::Value(v) => {
+                    writeln!(f, "--{name}={v}")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
