@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
-use crate::error::ResolveError;
 
 #[derive(Clone, Debug)]
 pub struct CanonicalRoot(PathBuf);
 
 impl CanonicalRoot {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ResolveError> {
-        let canonical = path.as_ref()
-            .canonicalize()
-            .map_err(ResolveError::Io)?;
+    pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+        let canonical = path.as_ref().canonicalize()?;
 
         if !canonical.is_dir() {
-            return Err(ResolveError::InvalidRoot(canonical));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                format!("{} is not a directory", canonical.display()),
+            ));
         }
 
         Ok(Self(canonical))

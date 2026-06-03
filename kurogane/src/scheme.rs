@@ -23,10 +23,45 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use percent_encoding::percent_decode_str;
 use mime_guess::MimeGuess;
 use url::Url;
-use crate::error::ResolveError;
 use crate::fs::CanonicalRoot;
 
 use crate::debug;
+
+/// Errors returned when resolving an app:// request.
+/// Each variant maps to an HTTP status code.
+#[derive(Debug)]
+pub enum ResolveError {
+    /// The URL could not be parsed, or its scheme is not app
+    InvalidUrl,
+    /// The resolved path escapes the asset root (path-traversal attempt)
+    Forbidden(PathBuf),
+    /// The path is inside the root but the file does not exist
+    NotFound(PathBuf),
+    /// An I/O error occurred after validation
+    Io(std::io::Error),
+}
+
+impl ResolveError {
+    pub fn http_status(&self) -> i32 {
+        match self {
+            Self::InvalidUrl => 400,
+            Self::Forbidden(_) => 403,
+            Self::NotFound(_) => 404,
+            Self::Io(_) => 500,
+        }
+    }
+}
+
+impl std::fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidUrl => write!(f, "Invalid URL"),
+            Self::Forbidden(p) => write!(f, "Forbidden: {}", p.display()),
+            Self::NotFound(p) => write!(f, "Not found: {}", p.display()),
+            Self::Io(e) => write!(f, "I/O error: {e}"),
+        }
+    }
+}
 
 /// A successfully resolved file asset.
 #[derive(Debug)]
