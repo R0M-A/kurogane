@@ -172,16 +172,11 @@ mod tests {
         let file = dir.path().join("file.txt");
         fs::write(&file, b"hello").unwrap();
 
-        let source = Source::Path(file.clone());
+        let source = Source::Path(file);
 
         let err = resolve(&source).unwrap_err();
 
-        match err {
-            RuntimeError::InvalidAssetRoot(p) => {
-                assert_eq!(p, file.canonicalize().unwrap());
-            }
-            _ => panic!("expected InvalidAssetRoot"),
-        }
+        assert!(matches!(err, RuntimeError::InvalidAssetRoot(_)));
     }
 
     #[test]

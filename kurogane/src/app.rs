@@ -168,3 +168,49 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn json_noop(_: Value) -> Result<Value, String> {
+        Ok(Value::Null)
+    }
+
+    fn binary_noop(_: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(vec![])
+    }
+
+    #[test]
+    #[should_panic(expected = "registered twice")]
+    fn duplicate_json_command_panics() {
+        App::new("./dist")
+            .command("ping", json_noop)
+            .command("ping", json_noop);
+    }
+
+    #[test]
+    #[should_panic(expected = "registered twice")]
+    fn duplicate_binary_command_panics() {
+        App::new("./dist")
+            .binary_command("upload", binary_noop)
+            .binary_command("upload", binary_noop);
+    }
+
+    #[test]
+    #[should_panic(expected = "registered twice")]
+    fn json_and_binary_names_cannot_collide() {
+        App::new("./dist")
+            .command("transfer", json_noop)
+            .binary_command("transfer", binary_noop);
+    }
+
+    #[test]
+    #[should_panic(expected = "registered twice")]
+    fn binary_and_json_names_cannot_collide() {
+        App::new("./dist")
+            .binary_command("transfer", binary_noop)
+            .command("transfer", json_noop);
+    }
+}
