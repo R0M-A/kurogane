@@ -2,6 +2,7 @@
 
 use super::Source;
 
+use url::Url;
 use std::io::ErrorKind;
 use crate::error::RuntimeError;
 use crate::fs::CanonicalRoot;
@@ -24,10 +25,15 @@ const APP_URL: &str = "app://app/index.html";
 /// Errors if no valid frontend is found.
 pub(crate) fn resolve(source: &Source) -> Result<ResolvedFrontend, RuntimeError> {
     match source {
-        Source::Url(url) => Ok(ResolvedFrontend {
-            asset_root: None,
-            start_url: url.clone(),
-        }),
+        Source::Url(url) => {
+            Url::parse(url)
+                .map_err(|_| RuntimeError::InvalidFrontendUrl(url.clone()))?;
+
+            Ok(ResolvedFrontend {
+                asset_root: None,
+                start_url: url.clone(),
+            })
+        },
 
         Source::Path(dir) => {
             let root = match CanonicalRoot::new(dir) {

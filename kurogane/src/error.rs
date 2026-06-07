@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub enum RuntimeError {
     InvalidAssetRoot(PathBuf),
+    InvalidFrontendUrl(String),
     AssetRootMissing(PathBuf),
     AssetRootUnavailable {
         path: PathBuf,
@@ -27,6 +28,18 @@ impl Display for RuntimeError {
                     "Ensure you pass a directory containing your frontend build (with index.html)."
                 ),
                 path.display()
+            ),
+
+            RuntimeError::InvalidFrontendUrl(url) => write!(
+                f,
+                concat!(
+                    "Invalid URL:\n\n",
+                    "  {}\n\n",
+                    "Use a fully qualified URL such as:\n\n",
+                    "  http://localhost:3000\n",
+                    "  https://example.com"
+                ),
+                url
             ),
 
             RuntimeError::AssetRootMissing(path) => write!(
