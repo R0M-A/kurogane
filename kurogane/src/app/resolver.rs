@@ -49,10 +49,10 @@ pub(crate) fn resolve(source: &Source) -> Result<ResolvedFrontend, RuntimeError>
                 }
             };
 
-            let index = root.as_path().join("index.html");
-            if !index.is_file() {
-                return Err(RuntimeError::AssetRootMissing(root.as_path().to_path_buf()));
-            }
+            crate::scheme::validate_asset_root(&root)
+                .map_err(|_| {
+                    RuntimeError::AssetRootMissing(root.as_path().to_path_buf())
+                })?;
 
             Ok(ResolvedFrontend {
                 asset_root: Some(root),

@@ -332,6 +332,14 @@ pub fn resolve_asset(root: &CanonicalRoot, rel_path: &str) -> Result<ResolvedAss
     })
 }
 
+/// Validates the asset root by resolving its 'index.html' entrypoint.
+pub(crate) fn validate_asset_root(
+    root: &CanonicalRoot,
+) -> Result<(), ResolveError> {
+    resolve_asset(root, "index.html")?;
+    Ok(())
+}
+
 /// Returns the MIME type for a given path based on its file extension.
 /// Unknown extensions fall back to 'application/octet-stream'.
 fn mime_from_path(path: &Path) -> String {
