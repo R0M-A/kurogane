@@ -105,17 +105,20 @@ mod tests {
     // Normalization and precedence tests
 
     #[test]
-    fn set_replaces_existing_switch() {
+    fn duplicate_set_keeps_single_effective_switch() {
         let mut flags = ChromiumFlags::default();
 
         flags.set("disable-gpu");
         flags.set("disable-gpu");
 
-        assert_eq!(flags.switches.len(), 1);
+        assert_eq!(
+            flags.switches.get("disable-gpu"),
+            Some(&SwitchValue::Present)
+        );
     }
 
     #[test]
-    fn last_value_wins() {
+    fn last_assignment_wins() {
         let mut flags = ChromiumFlags::default();
 
         flags.set_with_value("use-gl", "angle");
@@ -147,26 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn user_flags_override_defaults() {
+    fn flag_replaces_existing_value() {
         let mut flags = ChromiumFlags::default();
 
-        flags.set_with_value(
-            "use-gl",
-            "angle",
-        );
-
-        flags.extend_user_flags(&[
-            ChromiumFlag::WithValue(
-                "use-gl".into(),
-                "egl".into(),
-            )
-        ]);
+        flags.set_with_value("foo", "bar");
+        flags.set("foo");
 
         assert_eq!(
-            flags.switches.get("use-gl"),
-            Some(&SwitchValue::Value(
-                "egl".into()
-            ))
+            flags.switches.get("foo"),
+            Some(&SwitchValue::Present)
         );
     }
 }
@@ -198,6 +190,76 @@ mod property_tests {
             prop_assert_eq!(
                 flags.switches.get(&key),
                 Some(&SwitchValue::Value(second))
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn user_flags_always_override_runtime_values(
+            key in "[a-z0-9\\-]{1,32}",
+            runtime in ".*",
+            user in ".*",
+        ) {
+            let mut flags = ChromiumFlags::default();
+
+            flags.set_with_value(key.clone(), runtime);
+
+            flags.extend_user_flags(&[
+                ChromiumFlag::WithValue(
+                    key.clone(),
+                    user.clone(),
+                )
+            ]);
+
+            prop_assert_eq!(
+                flags.switches.get(&key),
+                Some(&SwitchValue::Value(user))
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn intermediate_assignments_do_not_affect_final_state(
+            key in "[a-z0-9\\-]{1,32}",
+            a in ".*",
+            b in ".*",
+            c in ".*",
+        ) {
+            let mut flags = ChromiumFlags::default();
+
+            flags.set_with_value(key.clone(), a);
+            flags.set_with_value(key.clone(), b);
+            flags.set_with_value(key.clone(), c.clone());
+
+            prop_assert_eq!(
+                flags.switches.get(&key),
+                Some(&SwitchValue::Value(c))
+            );
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn number_of_switches_equals_number_of_unique_keys(
+            keys in prop::collection::vec(
+                "[a-z0-9\\-]{1,16}",
+                0..50
+            )
+        ) {
+            let mut flags = ChromiumFlags::default();
+
+            for key in &keys {
+                flags.set(key.clone());
+            }
+
+            let unique: std::collections::HashSet<_> =
+                keys.iter().collect();
+
+            prop_assert_eq!(
+                flags.switches.len(),
+                unique.len()
             );
         }
     }
