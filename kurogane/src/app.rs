@@ -68,12 +68,11 @@ impl App {
     {
         let name = name.into();
 
-        assert!(
-            !self.commands.contains_key(&name) && !self.binary_commands.contains_key(&name),
-            "command '{name}' registered twice"
-        );
+        if self.commands.contains_key(&name) || self.binary_commands.contains_key(&name) {
+            panic!("command '{name}' registered twice");
+        }
 
-        // Wrap the typed handler into the wire-level IpcHandler once.
+        // Wrap the typed handler into the wire-level IpcHandler once
         let wrapped: IpcHandler = Box::new(move |payload: &str| {
             let input: Value = if payload.is_empty() {
                 Value::Null
@@ -101,10 +100,9 @@ impl App {
     {
         let name = name.into();
 
-        assert!(
-            !self.commands.contains_key(&name) && !self.binary_commands.contains_key(&name),
-            "command '{name}' registered twice"
-        );
+        if self.commands.contains_key(&name) || self.binary_commands.contains_key(&name) {
+            panic!("command '{name}' registered twice");
+        }
 
         self.binary_commands.insert(name, Box::new(handler));
         self
