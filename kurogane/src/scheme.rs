@@ -185,7 +185,7 @@ wrap_resource_handler! {
             handle_request: Option<&mut i32>,
             _callback: Option<&mut Callback>,
         ) -> i32 {
-            self.offset.store(0, Ordering::Release);
+            self.offset.store(0, Ordering::Relaxed);
 
             if let Some(hr) = handle_request {
                 *hr = 1;
@@ -209,7 +209,7 @@ wrap_resource_handler! {
                 return 0;
             }
 
-            let offset = self.offset.load(Ordering::Acquire);
+            let offset = self.offset.load(Ordering::Relaxed);
             let data = self.data.as_ref();
 
             debug_assert!(offset <= data.len(), "offset invariant broken");
@@ -223,9 +223,7 @@ wrap_resource_handler! {
                     std::ptr::copy_nonoverlapping(remaining.as_ptr(), data_out, read);
                 }
 
-                self.offset.fetch_add(read, Ordering::AcqRel);
-
-                debug_assert!(offset + read <= data.len(), "offset exceeded buffer length");
+                self.offset.fetch_add(read, Ordering::Relaxed);
             }
 
             *br = read as i32;
