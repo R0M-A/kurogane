@@ -11,11 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::fs::CanonicalRoot;
 use crate::client::KuroganeClient;
 use crate::ipc::IpcDispatcher;
+use crate::message_loop::ShutdownSignal;
 use crate::debug;
 
 wrap_browser_process_handler! {
     pub struct KuroganeBrowserProcessHandler {
         window: Arc<Mutex<Option<Window>>>,
+        shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
         dispatcher: Arc<IpcDispatcher>,
@@ -79,7 +81,7 @@ wrap_browser_process_handler! {
             debug!("BrowserView created");
 
             // Create delegate
-            let mut delegate = crate::window::KuroganeWindowDelegate::new(browser_view, self.window.clone());
+            let mut delegate = crate::window::KuroganeWindowDelegate::new(browser_view, self.window.clone(), self.shutdown_signal.clone());
 
             // Create window
             debug!("Creating top-level window");

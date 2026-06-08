@@ -7,6 +7,8 @@ use crate::error::RuntimeError;
 use crate::gpu::GpuMode;
 use crate::chromium_flags::ChromiumFlag;
 use crate::fs::CanonicalRoot;
+use crate::message_loop::MessageLoopMode;
+use crate::message_loop::ShutdownSignal;
 use kurogane_layout::{detect_cef_root, validate_cef_root, profile_dir};
 use crate::ipc::IpcDispatcher;
 use crate::debug;
@@ -186,6 +188,7 @@ impl Runtime {
         persist_session_cookies: bool,
         gpu_mode: GpuMode,
         chromium_flags: Vec<ChromiumFlag>,
+        message_loop_mode: MessageLoopMode,
     ) -> Result<(), RuntimeError> {
         #[cfg(target_os = "macos")]
         crate::platform::macos::init_ns_app();
@@ -198,9 +201,12 @@ impl Runtime {
         let window = Arc::new(Mutex::new(None));
         let window_creation_started = Arc::new(AtomicBool::new(false));
 
+        let shutdown_signal = ShutdownSignal::new();
+
         // ONE app for ALL processes
         let mut app: App = KuroganeApp::new(
             window.clone(),
+            shutdown_signal.clone(),
             CefString::from(start_url.as_str()),
             asset_root,
             dispatcher,
@@ -232,7 +238,11 @@ impl Runtime {
         install_ctrlc_handler(window.clone());
 
         debug!("Entering CEF message loop");
-        run_message_loop();
+        crate::message_loop::run(
+            message_loop_mode,
+            &shutdown_signal,
+        );
+
         debug!("Message loop exited");
 
         debug!("Shutting down CEF");

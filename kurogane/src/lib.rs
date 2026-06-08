@@ -14,6 +14,7 @@ mod fs;
 mod chromium_flags;
 mod sandbox;
 mod gpu;
+pub mod message_loop;
 pub mod ipc;
 pub mod bridge;
 pub mod logger;
@@ -25,6 +26,7 @@ pub use runtime::Runtime;
 pub use gpu::GpuMode;
 pub use error::RuntimeError;
 pub use app::App;
+pub use message_loop::MessageLoopMode;
 
 // Re-export IPC types for public use
 pub use crate::ipc::IpcResult;

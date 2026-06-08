@@ -13,12 +13,14 @@ use crate::ipc::IpcDispatcher;
 use crate::chromium_flags::{ChromiumFlag, ChromiumFlags};
 use crate::gpu::{GpuMode, apply_gpu_flags};
 use crate::sandbox::apply_sandbox_flags;
+use crate::message_loop::ShutdownSignal;
 
 use cef::sys::cef_scheme_options_t::*;
 
 wrap_app! {
     pub struct KuroganeApp {
         window: Arc<Mutex<Option<Window>>>,
+        shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
         dispatcher: Arc<IpcDispatcher>,
@@ -85,6 +87,7 @@ wrap_app! {
             Some(
                 KuroganeBrowserProcessHandler::new(
                     self.window.clone(),
+                    self.shutdown_signal.clone(),
                     self.start_url.clone(),
                     self.asset_root.clone(),
                     self.dispatcher.clone(),

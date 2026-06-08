@@ -12,6 +12,7 @@ use crate::ipc::browser_state::{IpcDispatcher, IpcHandler, BinaryHandler};
 use crate::{Runtime, RuntimeError};
 use crate::chromium_flags::ChromiumFlag;
 use crate::gpu::GpuMode;
+use crate::message_loop::MessageLoopMode;
 
 mod resolver;
 
@@ -33,6 +34,7 @@ pub struct App {
     persist_session_cookies: bool,
     gpu_mode: GpuMode,
     chromium_flags: Vec<ChromiumFlag>,
+    message_loop_mode: MessageLoopMode,
 }
 
 impl App {
@@ -56,6 +58,7 @@ impl App {
             persist_session_cookies: true,
             gpu_mode: GpuMode::Auto,
             chromium_flags: Vec::new(),
+            message_loop_mode: MessageLoopMode::Blocking,
         }
     }
 
@@ -141,6 +144,14 @@ impl App {
         self
     }
 
+    /// Select the message loop driver strategy.
+    ///
+    /// Defaults to MessageLoopMode::Blocking.
+    pub fn message_loop_mode(mut self, mode: MessageLoopMode) -> Self {
+        self.message_loop_mode = mode;
+        self
+    }
+
     /// Start the application
     pub fn run(self) -> Result<(), RuntimeError> {
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&self.source)?;
@@ -156,6 +167,7 @@ impl App {
             self.persist_session_cookies,
             self.gpu_mode,
             self.chromium_flags,
+            self.message_loop_mode,
         )
     }
 
@@ -212,5 +224,11 @@ mod tests {
         App::new("./dist")
             .binary_command("transfer", binary_noop)
             .command("transfer", json_noop);
+    }
+
+    #[test]
+    fn default_message_loop_mode_is_blocking() {
+        use crate::message_loop::MessageLoopMode;
+        assert_eq!(MessageLoopMode::default(), MessageLoopMode::Blocking);
     }
 }
