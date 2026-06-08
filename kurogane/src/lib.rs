@@ -22,11 +22,11 @@ pub mod logger;
 #[cfg(target_os = "macos")]
 mod platform;
 
-pub use runtime::Runtime;
+pub use runtime::{Runtime, RuntimeHandle};
 pub use gpu::GpuMode;
 pub use error::RuntimeError;
 pub use app::App;
 pub use message_loop::MessageLoopMode;
 
 // Re-export IPC types for public use
-pub use crate::ipc::IpcResult;
+pub use crate::ipc::{IpcResult, IpcDispatcher};

@@ -176,10 +176,142 @@ wrap_task! {
     }
 }
 
+pub(crate) struct RuntimeState {
+    shutdown_signal: ShutdownSignal,
+}
+
+/// Handle to a live initialized CEF runtime.
+///
+/// Enables external event-loop integration by separating runtime polling from loop ownership.
+pub struct RuntimeHandle {
+    state: RuntimeState,
+    shutdown_called: AtomicBool,
+}
+
+impl RuntimeHandle {
+    /// Advance Chromium by one message-loop iteration.
+    ///
+    /// Call this from your own event loop when using Pump mode.
+    pub fn pump(&self) {
+        do_message_loop_work();
+    }
+
+    /// Returns true when shutdown has been requested
+    /// e.g. the window was closed or Ctrl+C was received.
+    pub fn should_shutdown(&self) -> bool {
+        self.state.shutdown_signal.is_shutdown_requested()
+    }
+
+    /// Perform orderly CEF shutdown.
+    ///
+    /// Safe to call multiple times. Subsequent calls are no-ops.
+    pub fn shutdown(&self) {
+        if self.shutdown_called.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        debug!("Shutting down CEF via RuntimeHandle");
+        shutdown();
+        debug!("CEF shutdown complete via RuntimeHandle");
+    }
+}
+
+/// Performs all startup work before the message loop.
+///
+/// Returns a ShutdownSignal and the shared window reference on success.
+fn initialize_cef(
+    start_url: String,
+    asset_root: Option<CanonicalRoot>,
+    dispatcher: Arc<IpcDispatcher>,
+    profile_id: Option<String>,
+    persist_session_cookies: bool,
+    gpu_mode: GpuMode,
+    chromium_flags: Vec<ChromiumFlag>,
+) -> Result<RuntimeState, RuntimeError> {
+    #[cfg(target_os = "macos")]
+    crate::platform::macos::init_ns_app();
+
+    let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
+
+    debug!("Runtime initializing");
+
+    let args = Args::new();
+    let window = Arc::new(Mutex::new(None));
+    let window_creation_started = Arc::new(AtomicBool::new(false));
+
+    let shutdown_signal = ShutdownSignal::new();
+
+    // ONE app for ALL processes
+    let mut app: App = KuroganeApp::new(
+        window.clone(),
+        shutdown_signal.clone(),
+        CefString::from(start_url.as_str()),
+        asset_root,
+        dispatcher,
+        window_creation_started,
+        gpu_mode,
+        chromium_flags,
+    );
+
+    debug!("Executing subprocess dispatch");
+    execute_subprocesses(&args, &mut app);
+
+    let layout = resolve_layout(profile_id)?;
+    let settings = build_settings(&layout, persist_session_cookies);
+
+    debug!("Initializing CEF");
+
+    if initialize(
+        Some(args.as_main_args()),
+        Some(&settings),
+        Some(&mut app),
+        std::ptr::null_mut(),
+    ) != 1 {
+        return Err(RuntimeError::CefInitializeFailed);
+    }
+
+    debug!("CEF initialized");
+
+    debug!("Installing shutdown handler");
+    install_ctrlc_handler(window.clone());
+
+    Ok(RuntimeState { shutdown_signal })
+}
+
 impl Runtime {
+    /// Initialize CEF and return a RuntimeHandle without entering a message loop.
+    ///
+    /// The caller takes ownership of the event loop and must periodically call
+    /// RuntimeHandle::pump when using Pump mode, then call
+    /// RuntimeHandle::shutdown to clean up.
+    pub fn start(
+        start_url: String,
+        asset_root: Option<CanonicalRoot>,
+        dispatcher: Arc<IpcDispatcher>,
+        profile_id: Option<String>,
+        persist_session_cookies: bool,
+        gpu_mode: GpuMode,
+        chromium_flags: Vec<ChromiumFlag>,
+    ) -> Result<RuntimeHandle, RuntimeError> {
+        let state = initialize_cef(
+            start_url,
+            asset_root,
+            dispatcher,
+            profile_id,
+            persist_session_cookies,
+            gpu_mode,
+            chromium_flags,
+        )?;
+
+        Ok(RuntimeHandle {
+            state,
+            shutdown_called: AtomicBool::new(false),
+        })
+    }
+
     /// Launches the CEF runtime and blocks until shutdown.
     ///
-    /// start_url determines what the browser loads on startup.
+    /// Internally delegates to Runtime::start + message loop + shutdown.
+    /// Existing applications using this API continue to work unchanged.
     pub fn run(
         start_url: String,
         asset_root: Option<CanonicalRoot>,
@@ -190,57 +322,19 @@ impl Runtime {
         chromium_flags: Vec<ChromiumFlag>,
         message_loop_mode: MessageLoopMode,
     ) -> Result<(), RuntimeError> {
-        #[cfg(target_os = "macos")]
-        crate::platform::macos::init_ns_app();
-
-        let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
-
-        debug!("Runtime starting");
-
-        let args = Args::new();
-        let window = Arc::new(Mutex::new(None));
-        let window_creation_started = Arc::new(AtomicBool::new(false));
-
-        let shutdown_signal = ShutdownSignal::new();
-
-        // ONE app for ALL processes
-        let mut app: App = KuroganeApp::new(
-            window.clone(),
-            shutdown_signal.clone(),
-            CefString::from(start_url.as_str()),
+        let state = initialize_cef(
+            start_url,
             asset_root,
             dispatcher,
-            window_creation_started,
+            profile_id,
+            persist_session_cookies,
             gpu_mode,
             chromium_flags,
-        );
+        )?;
 
-        debug!("Executing subprocess dispatch");
-        execute_subprocesses(&args, &mut app);
-
-        let layout = resolve_layout(profile_id)?;
-        let settings = build_settings(&layout, persist_session_cookies);
-
-        debug!("Initializing CEF");
-
-        if initialize(
-            Some(args.as_main_args()),
-            Some(&settings),
-            Some(&mut app),
-            std::ptr::null_mut(),
-        ) != 1 {
-            return Err(RuntimeError::CefInitializeFailed);
-        }
-
-        debug!("CEF initialized");
-
-        debug!("Installing shutdown handler");
-        install_ctrlc_handler(window.clone());
-
-        debug!("Entering CEF message loop");
         crate::message_loop::run(
             message_loop_mode,
-            &shutdown_signal,
+            &state.shutdown_signal,
         );
 
         debug!("Message loop exited");
