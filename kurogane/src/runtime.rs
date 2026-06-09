@@ -187,10 +187,19 @@ pub struct RuntimeHandle {
     shutdown_called: AtomicBool,
 }
 
+impl Drop for RuntimeHandle {
+    fn drop(&mut self) {
+        // CEF requires shutdown on the same thread as initialize
+        // Callers must not move RuntimeHandle across threads after start()
+        self.shutdown();
+    }
+}
+
 impl RuntimeHandle {
-    /// Advance Chromium by one message-loop iteration.
+    /// Advances Chromium by one iteration of its internal message loop.
     ///
-    /// Call this from your own event loop when using Pump mode.
+    /// When using external event-loop ownership via App::start,
+    /// this must be called repeatedly on the same thread.
     pub fn pump(&self) {
         do_message_loop_work();
     }
@@ -334,7 +343,9 @@ impl Runtime {
 
         debug!("Message loop exited");
 
+        debug!("Shutting down CEF");
         handle.shutdown();
+        debug!("CEF shutdown complete");
 
         Ok(())
     }

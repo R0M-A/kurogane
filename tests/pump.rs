@@ -3,16 +3,16 @@ use std::time::Duration;
 use kurogane::App;
 
 fn main() {
-    let runtime = App::url("https://example.com")
+    let kurogane = App::url("https://example.com")
         .start()
         .expect("Kurogane failed to initialize");
 
-    let tick = Duration::from_millis(16);
+    let tick = Duration::from_millis(16); // optional
 
-    while !runtime.should_shutdown() {
-        runtime.pump();
+    while !kurogane.should_shutdown() {
+        kurogane.pump();
         std::thread::sleep(tick);
     }
 
-    runtime.shutdown();
+    kurogane.shutdown();
 }
