@@ -104,5 +104,9 @@ wrap_browser_process_handler! {
 
             *self.window.lock().unwrap() = Some(window);
         }
+
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+            debug!("CEF requested pump in {}ms", delay_ms);
+        }
     }
 }

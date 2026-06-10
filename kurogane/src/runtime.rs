@@ -68,7 +68,7 @@ fn resolve_layout(profile_id: Option<String>) -> Result<RuntimeLayout, RuntimeEr
     })
 }
 
-fn build_settings(layout: &RuntimeLayout, persist_session_cookies: bool) -> Settings {
+fn build_settings(layout: &RuntimeLayout, persist_session_cookies: bool, external_message_pump: bool) -> Settings {
     // Use a persistent profile instead of CEF's default incognito mode
     // This enables cookies, storage APIs and service workers
 
@@ -81,6 +81,7 @@ fn build_settings(layout: &RuntimeLayout, persist_session_cookies: bool) -> Sett
         Settings {
             browser_subprocess_path: CefString::from(exe_str.as_ref()),
             resources_dir_path: CefString::from(cef_root_str.as_ref()),
+            external_message_pump: external_message_pump as i32,
             locales_dir_path: CefString::from(layout.locales_dir.to_string_lossy().as_ref()),
             cache_path: CefString::from(layout.cache_dir.to_string_lossy().as_ref()),
             root_cache_path: CefString::from(layout.cache_dir.to_string_lossy().as_ref()),
@@ -95,6 +96,7 @@ fn build_settings(layout: &RuntimeLayout, persist_session_cookies: bool) -> Sett
         let mut s = Settings {
             browser_subprocess_path: CefString::from(exe_str.as_ref()),
             resources_dir_path: CefString::from(cef_root_str.as_ref()),
+            external_message_pump: external_message_pump as i32,
             locales_dir_path: CefString::from(layout.locales_dir.to_string_lossy().as_ref()),
             cache_path: CefString::from(layout.cache_dir.to_string_lossy().as_ref()),
             root_cache_path: CefString::from(layout.cache_dir.to_string_lossy().as_ref()),
@@ -328,6 +330,7 @@ fn initialize_cef(
     gpu_mode: GpuMode,
     chromium_flags: Vec<ChromiumFlag>,
     embedded_mode: bool,
+    external_message_pump: bool,
 ) -> Result<RuntimeState, RuntimeError> {
     #[cfg(target_os = "macos")]
     crate::platform::macos::init_ns_app();
@@ -361,7 +364,7 @@ fn initialize_cef(
     execute_subprocesses(&args, &mut app);
 
     let layout = resolve_layout(profile_id)?;
-    let settings = build_settings(&layout, persist_session_cookies);
+    let settings = build_settings(&layout, persist_session_cookies, external_message_pump);
 
     debug!("Initializing CEF");
 
@@ -414,6 +417,7 @@ impl Runtime {
             gpu_mode,
             chromium_flags,
             false,
+            false,
         )?;
 
         Ok(RuntimeHandle {
@@ -441,6 +445,7 @@ impl Runtime {
             gpu_mode,
             chromium_flags,
             true,
+            true,
         )?;
 
         Ok(RuntimeHandle {
@@ -451,7 +456,7 @@ impl Runtime {
 
     /// Launches the CEF runtime and blocks until shutdown.
     ///
-    /// Internally delegates to Runtime::start + message loop + shutdown.
+    /// Uses CEF's internal message loop (external_message_pump = false).
     /// Existing applications using this API continue to work unchanged.
     pub fn run(
         start_url: String,

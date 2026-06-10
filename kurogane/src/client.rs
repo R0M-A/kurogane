@@ -18,10 +18,12 @@ wrap_life_span_handler! {
 
     impl LifeSpanHandler {
         fn on_after_created(&self, _browser: Option<&mut Browser>) {
+            debug!("on_before_close");
             self.browser_ref_count.fetch_add(1, Ordering::SeqCst);
         }
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            debug!("on_before_close");
             if self.browser_ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
                 self.shutdown_signal.request_shutdown();
                 debug!("Browser destroyed");
