@@ -1,6 +1,6 @@
 use cef::{args::Args, sys::cef_window_handle_t, *};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::cef_app::KuroganeApp;
 use crate::client::KuroganeClient;
@@ -179,6 +179,7 @@ wrap_task! {
 pub(crate) struct RuntimeState {
     shutdown_signal: ShutdownSignal,
     dispatcher: Arc<IpcDispatcher>,
+    browser_ref_count: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -295,7 +296,7 @@ impl RuntimeHandle {
             },
         );
 
-        let mut client = KuroganeClient::new(self.state.dispatcher.clone());
+        let mut client = KuroganeClient::new(self.state.dispatcher.clone(), self.state.shutdown_signal.clone(), self.state.browser_ref_count.clone());
 
         browser_host_create_browser_sync(
             Some(&info),
@@ -338,12 +339,14 @@ fn initialize_cef(
     let args = Args::new();
     let window = Arc::new(Mutex::new(None));
     let window_creation_started = Arc::new(AtomicBool::new(false));
+    let browser_ref_count = Arc::new(AtomicUsize::new(0));
 
     let shutdown_signal = ShutdownSignal::new();
 
     // ONE app for ALL processes
     let mut app: App = KuroganeApp::new(
         window.clone(),
+        browser_ref_count.clone(),
         shutdown_signal.clone(),
         CefString::from(start_url.as_str()),
         asset_root,
@@ -383,6 +386,7 @@ fn initialize_cef(
     Ok(RuntimeState {
         shutdown_signal,
         dispatcher,
+        browser_ref_count,
     })
 }
 

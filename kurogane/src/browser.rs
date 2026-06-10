@@ -6,7 +6,7 @@
 use cef::*;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::fs::CanonicalRoot;
 use crate::client::KuroganeClient;
@@ -17,6 +17,7 @@ use crate::debug;
 wrap_browser_process_handler! {
     pub struct KuroganeBrowserProcessHandler {
         window: Arc<Mutex<Option<Window>>>,
+        browser_ref_count: Arc<AtomicUsize>,
         shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
@@ -75,7 +76,7 @@ wrap_browser_process_handler! {
                 return;
             }
 
-            let mut client = KuroganeClient::new(self.dispatcher.clone());
+            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.browser_ref_count.clone());
             let url = self.start_url.clone();
 
             debug!("Creating main browser with URL: {}", url.to_string());

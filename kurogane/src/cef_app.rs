@@ -2,7 +2,7 @@
 
 use cef::*;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::cell::RefCell;
 
 use crate::browser::KuroganeBrowserProcessHandler;
@@ -20,6 +20,7 @@ use cef::sys::cef_scheme_options_t::*;
 wrap_app! {
     pub struct KuroganeApp {
         window: Arc<Mutex<Option<Window>>>,
+        browser_ref_count: Arc<AtomicUsize>,
         shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
@@ -88,6 +89,7 @@ wrap_app! {
             Some(
                 KuroganeBrowserProcessHandler::new(
                     self.window.clone(),
+                    self.browser_ref_count.clone(),
                     self.shutdown_signal.clone(),
                     self.start_url.clone(),
                     self.asset_root.clone(),

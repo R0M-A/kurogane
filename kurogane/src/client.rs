@@ -3,6 +3,7 @@
 use cef::*;
 use crate::debug;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::ipc::IpcDispatcher;
 use crate::ShutdownSignal;
 
@@ -12,12 +13,19 @@ use crate::ShutdownSignal;
 wrap_life_span_handler! {
     pub struct KuroganeLifeSpanHandler {
         shutdown_signal: ShutdownSignal,
+        browser_ref_count: Arc<AtomicUsize>,
     }
 
     impl LifeSpanHandler {
+        fn on_after_created(&self, _browser: Option<&mut Browser>) {
+            self.browser_ref_count.fetch_add(1, Ordering::SeqCst);
+        }
+
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            self.shutdown_signal.request_shutdown();
-            debug!("Browser destroyed");
+            if self.browser_ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+                self.shutdown_signal.request_shutdown();
+                debug!("Browser destroyed");
+            }
         }
     }
 }
@@ -75,6 +83,7 @@ wrap_client! {
     pub struct KuroganeClient {
         dispatcher: Arc<IpcDispatcher>,
         shutdown_signal: ShutdownSignal,
+        browser_ref_count: Arc<AtomicUsize>,
     }
 
     impl Client {
@@ -83,7 +92,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(KuroganeLifeSpanHandler::new(self.shutdown_signal.clone()))
+            Some(KuroganeLifeSpanHandler::new(self.shutdown_signal.clone(), self.browser_ref_count.clone()))
         }
 
         fn on_process_message_received(
