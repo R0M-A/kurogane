@@ -225,6 +225,16 @@ fn native_to_cef_window(
     }
 }
 
+pub struct BrowserHandle {
+    inner: cef::Browser,
+}
+
+impl BrowserHandle {
+    pub fn close(&self, force: bool) {
+        self.inner.host().map(|h| h.close_browser(force as i32));
+    }
+}
+
 impl RuntimeHandle {
     /// Advances Chromium by one iteration of its internal message loop.
     ///
@@ -270,7 +280,7 @@ impl RuntimeHandle {
         parent: *mut std::ffi::c_void,
         bounds: BrowserBounds,
         url: &str,
-    ) -> bool
+    ) -> Option<BrowserHandle>
     {
         let info = WindowInfo {
             runtime_style: RuntimeStyle::ALLOY,
@@ -295,7 +305,7 @@ impl RuntimeHandle {
             None,
             None,
         )
-        .is_some()
+        .map(|b| BrowserHandle { inner: b })
     }
 }
 
