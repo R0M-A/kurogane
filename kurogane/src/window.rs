@@ -6,14 +6,12 @@
 use cef::*;
 use std::sync::{Arc, Mutex};
 
-use crate::ShutdownSignal;
 use crate::debug;
 
 wrap_window_delegate! {
     pub struct KuroganeWindowDelegate {
         browser_view: BrowserView,
         window_ref: Arc<Mutex<Option<Window>>>,
-        shutdown_signal: ShutdownSignal,
     }
 
     impl ViewDelegate {
@@ -47,7 +45,6 @@ wrap_window_delegate! {
             debug!("Window destroyed");
             // clear stored window reference to avoid use-after-destroy
             *self.window_ref.lock().unwrap() = None;
-            self.shutdown_signal.request_shutdown();
             quit_message_loop();
         }
 

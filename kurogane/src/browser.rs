@@ -92,7 +92,7 @@ wrap_browser_process_handler! {
             debug!("BrowserView created");
 
             // Create delegate
-            let mut delegate = crate::window::KuroganeWindowDelegate::new(browser_view, self.window.clone(), self.shutdown_signal.clone());
+            let mut delegate = crate::window::KuroganeWindowDelegate::new(browser_view, self.window.clone());
 
             // Create window
             debug!("Creating top-level window");

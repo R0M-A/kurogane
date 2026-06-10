@@ -4,6 +4,23 @@ use cef::*;
 use crate::debug;
 use std::sync::Arc;
 use crate::ipc::IpcDispatcher;
+use crate::ShutdownSignal;
+
+//
+// LifeSpanHandler
+//
+wrap_life_span_handler! {
+    pub struct KuroganeLifeSpanHandler {
+        shutdown_signal: ShutdownSignal,
+    }
+
+    impl LifeSpanHandler {
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            self.shutdown_signal.request_shutdown();
+            debug!("Browser destroyed");
+        }
+    }
+}
 
 //
 // LOAD HANDLER
@@ -57,11 +74,16 @@ wrap_load_handler! {
 wrap_client! {
     pub struct KuroganeClient {
         dispatcher: Arc<IpcDispatcher>,
+        shutdown_signal: ShutdownSignal,
     }
 
     impl Client {
         fn load_handler(&self) -> Option<LoadHandler> {
             Some(KuroganeLoadHandler::new())
+        }
+
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(KuroganeLifeSpanHandler::new(self.shutdown_signal.clone()))
         }
 
         fn on_process_message_received(
