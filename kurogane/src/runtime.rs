@@ -137,14 +137,17 @@ fn execute_subprocesses(args: &Args, app: &mut App) {
     debug!("Continuing as browser process");
 }
 
-fn install_ctrlc_handler(window_registry: Arc<Mutex<WindowRegistry>>) {
+fn install_ctrlc_handler(
+    registry: Arc<Mutex<BrowserRegistry>>,
+    window_registry: Arc<Mutex<WindowRegistry>>,
+) {
     // Prevent double-fire (dev hammers Ctrl+C twice)
     let quitting = Arc::new(AtomicBool::new(false));
-    let main = window_registry.clone();
 
     ctrlc::set_handler({
         let quitting = quitting.clone();
-        let main = main.clone();
+        let registry = registry.clone();
+        let window_registry = window_registry.clone();
 
         move || {
             debug!("SIGINT received");
@@ -155,9 +158,9 @@ fn install_ctrlc_handler(window_registry: Arc<Mutex<WindowRegistry>>) {
                 return;
             }
 
-            debug!("Scheduling window shutdown on UI thread");
+            debug!("Scheduling browser shutdown on UI thread");
 
-            let mut task = CloseWindowsTask::new(main.clone());
+            let mut task = CloseAllTask::new(registry.clone(), window_registry.clone());
             post_task(ThreadId::UI, Some(&mut task));
         }
     })
@@ -165,14 +168,28 @@ fn install_ctrlc_handler(window_registry: Arc<Mutex<WindowRegistry>>) {
 }
 
 wrap_task! {
-    struct CloseWindowsTask {
-        registry: Arc<Mutex<WindowRegistry>>,
+    struct CloseAllTask {
+        registry: Arc<Mutex<BrowserRegistry>>,
+        window_registry: Arc<Mutex<WindowRegistry>>,
     }
 
     impl Task {
         fn execute(&self) {
-            let reg = self.registry.lock().unwrap();
-            reg.close_all_windows();
+            // Close all browsers first in Views mode this cascades to close their parent windows
+            // In embedded mode there are no views windows
+            let browsers: Vec<Browser> = {
+                let reg = self.registry.lock().unwrap();
+                reg.iter().map(|(_, s)| s.browser.clone()).collect()
+            };
+            for browser in browsers {
+                if let Some(host) = browser.host() {
+                    host.close_browser(false as i32);
+                }
+            }
+
+            // Close remaining CEF Views windows not already handled by the browser close cascade above
+            let wreg = self.window_registry.lock().unwrap();
+            wreg.close_all_windows();
         }
     }
 }
@@ -500,6 +517,22 @@ impl RuntimeHandle {
         reg.close_all_windows();
     }
 
+    /// Close all live browser instances.
+    ///
+    /// When force is false, CEF fires onbeforeunload events giving pages a chance to prompt the user.
+    /// When true, browsers are closed unconditionally.
+    pub fn close_all_browsers(&self, force: bool) {
+        let browsers: Vec<Browser> = {
+            let reg = self.state.registry.lock().unwrap();
+            reg.iter().map(|(_, s)| s.browser.clone()).collect()
+        };
+        for browser in browsers {
+            if let Some(host) = browser.host() {
+                host.close_browser(force as i32);
+            }
+        }
+    }
+
     /// Look up the window that hosts a given browser, if any.
     pub fn find_window_by_browser(&self, browser_id: BrowserId) -> Option<WindowId> {
         self.state.window_registry.lock().unwrap()
@@ -790,7 +823,7 @@ fn initialize_cef(
     // In embedded mode the host application manages its own lifecycle
     if !embedded_mode {
         debug!("Installing shutdown handler");
-        install_ctrlc_handler(window_registry.clone());
+        install_ctrlc_handler(registry.clone(), window_registry.clone());
     }
 
     Ok(RuntimeState {
