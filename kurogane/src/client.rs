@@ -5,6 +5,7 @@ use crate::debug;
 use std::sync::{Arc, Mutex};
 use crate::ipc::IpcDispatcher;
 use crate::browser_registry::{BrowserRegistry, BrowserType};
+use crate::window_registry::WindowRegistry;
 use crate::ShutdownSignal;
 
 //
@@ -13,17 +14,26 @@ use crate::ShutdownSignal;
 wrap_life_span_handler! {
     pub struct KuroganeLifeSpanHandler {
         registry: Arc<Mutex<BrowserRegistry>>,
+        window_registry: Arc<Mutex<WindowRegistry>>,
     }
 
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser {
                 let mut reg = self.registry.lock().unwrap();
+
                 // Only register if not already registered
                 // Popups are registered by BrowserViewDelegate::on_popup_browser_view_created
                 if reg.find_id_by_browser(b).is_none() {
                     let clone = b.clone();
-                    reg.register(clone, BrowserType::Main, None);
+                    let id = reg.register(clone, BrowserType::Main, None);
+
+                    // Link this main browser to the main window
+                    // which was registered without a browser_id in on_window_created
+                    let mut wreg = self.window_registry.lock().unwrap();
+                    if let Some(wid) = wreg.link_browser_to_unassigned_window(id) {
+                        debug!("[BrowserRegistry] linked browser {} to window {}", id.as_u32(), wid.as_u32());
+                    }
                 }
             }
         }
@@ -99,6 +109,7 @@ wrap_client! {
         dispatcher: Arc<IpcDispatcher>,
         shutdown_signal: ShutdownSignal,
         registry: Arc<Mutex<BrowserRegistry>>,
+        window_registry: Arc<Mutex<WindowRegistry>>,
     }
 
     impl Client {
@@ -107,7 +118,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(KuroganeLifeSpanHandler::new(self.registry.clone()))
+            Some(KuroganeLifeSpanHandler::new(self.registry.clone(), self.window_registry.clone()))
         }
 
         fn on_process_message_received(

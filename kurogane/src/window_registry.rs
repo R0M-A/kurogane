@@ -14,16 +14,13 @@ impl WindowId {
 
 #[derive(Debug, Clone)]
 pub struct WindowMetadata {
-    #[allow(dead_code)]
     pub id: WindowId,
-    #[allow(dead_code)]
     pub created_at: std::time::Instant,
 }
 
 pub(crate) struct WindowState {
     pub window: Window,
     pub browser_id: Option<BrowserId>,
-    #[allow(dead_code)]
     pub metadata: WindowMetadata,
 }
 
@@ -116,6 +113,27 @@ impl WindowRegistry {
 
     pub fn window_id_for_browser(&self, browser_id: BrowserId) -> Option<WindowId> {
         self.lookup.get(&browser_id).copied()
+    }
+
+    /// Links the given browser_id to the first window that has no browser assigned.
+    /// Used to connect the main browser with the main window after on_after_created.
+    /// Returns the WindowId that was linked.
+    pub fn link_browser_to_unassigned_window(&mut self, browser_id: BrowserId) -> Option<WindowId> {
+        let wid = self.windows.iter()
+            .find(|(_, s)| s.browser_id.is_none())
+            .map(|(id, _)| *id)?;
+        self.windows.get_mut(&wid).unwrap().browser_id = Some(browser_id);
+        self.lookup.insert(browser_id, wid);
+        Some(wid)
+    }
+
+    pub fn browser_for_window(&self, id: WindowId) -> Option<BrowserId> {
+        self.windows.get(&id).and_then(|s| s.browser_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn metadata(&self, id: WindowId) -> Option<WindowMetadata> {
+        self.windows.get(&id).map(|s| s.metadata.clone())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&WindowId, &WindowState)> {

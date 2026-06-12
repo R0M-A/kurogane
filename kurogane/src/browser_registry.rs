@@ -15,7 +15,6 @@ impl BrowserId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserType {
     Main,
-    #[allow(dead_code)]
     Popup,
     #[allow(dead_code)]
     DevTools,
@@ -25,21 +24,15 @@ pub enum BrowserType {
 
 #[derive(Debug, Clone)]
 pub struct BrowserMetadata {
-    #[allow(dead_code)]
     pub id: BrowserId,
-    #[allow(dead_code)]
     pub browser_type: BrowserType,
-    #[allow(dead_code)]
     pub parent_id: Option<BrowserId>,
-    #[allow(dead_code)]
     pub opener_id: Option<BrowserId>,
-    #[allow(dead_code)]
     pub created_at: std::time::Instant,
 }
 
 pub(crate) struct BrowserState {
     pub browser: Browser,
-    #[allow(dead_code)]
     pub metadata: BrowserMetadata,
     #[allow(dead_code)]
     pub request_context: Option<RequestContext>,
@@ -114,7 +107,6 @@ impl BrowserRegistry {
         self.browsers.len()
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.browsers.is_empty()
     }
@@ -132,7 +124,20 @@ impl BrowserRegistry {
         self.lookup.get(&browser.identifier()).copied()
     }
 
-    #[allow(dead_code)]
+    pub fn set_opener(&mut self, id: BrowserId, opener_id: Option<BrowserId>) {
+        if let Some(state) = self.browsers.get_mut(&id) {
+            state.metadata.opener_id = opener_id;
+        }
+    }
+
+    pub fn browser_parent(&self, id: BrowserId) -> Option<BrowserId> {
+        self.browsers.get(&id).and_then(|s| s.metadata.parent_id)
+    }
+
+    pub fn browser_opener(&self, id: BrowserId) -> Option<BrowserId> {
+        self.browsers.get(&id).and_then(|s| s.metadata.opener_id)
+    }
+
     pub fn children_of(&self, parent_id: BrowserId) -> Vec<BrowserId> {
         self.browsers
             .iter()
@@ -150,7 +155,6 @@ impl BrowserRegistry {
             .collect()
     }
 
-    #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = (&BrowserId, &BrowserState)> {
         self.browsers.iter()
     }

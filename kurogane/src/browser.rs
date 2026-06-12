@@ -68,7 +68,7 @@ wrap_browser_process_handler! {
                 return;
             }
 
-            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.registry.clone());
+            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.registry.clone(), self.window_registry.clone());
             let url = self.start_url.clone();
 
             debug!("Creating main browser with URL: {}", url.to_string());

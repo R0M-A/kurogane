@@ -39,7 +39,7 @@ wrap_window_delegate! {
                 window.show();
                 debug!("Window shown");
 
-                // Register in window registry
+                // Register in window registry (browser_id set later from on_after_created)
                 let mut reg = self.registry.lock().unwrap();
                 reg.insert(
                     self.window_id,
