@@ -45,3 +45,7 @@ path = "wasm.rs"
 [[bin]]
 name = "winit"
 path = "winit.rs"
+
+[[bin]]
+name = "popups"
+path = "popups.rs"

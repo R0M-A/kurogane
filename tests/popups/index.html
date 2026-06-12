@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <title>Popups torture test</title>
+      <meta charset="utf-8">
+      <style>
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+        body {
+          font-family: monospace;
+          padding: 24px;
+          background: #1e1e2e;
+          color: #cdd6f4;
+        }
+        h1 {
+          margin-bottom: 16px;
+          font-size: 20px;
+        }
+        .controls {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 16px;
+        }
+        button {
+          padding: 8px 16px;
+          font-size: 13px;
+          cursor: pointer;
+          background: #45475a;
+          color: #cdd6f4;
+          border: none;
+          border-radius: 6px;
+        }
+        button:hover {
+          background: #585b70;
+        }
+        button.dump {
+          background: #a6e3a1;
+          color: #11111b;
+        }
+        button.dump:hover {
+          background: #b8efb6;
+        }
+        button.danger {
+          background: #f38ba8;
+          color: #11111b;
+        }
+        button.danger:hover {
+          background: #f5a4b8;
+        }
+        input {
+          padding: 8px 10px;
+          font-size: 13px;
+          border-radius: 6px;
+          border: none;
+          background: #313244;
+          color: #cdd6f4;
+          width: 80px;
+        }
+        pre {
+          background: #11111b;
+          padding: 16px;
+          border-radius: 8px;
+          overflow-x: auto;
+          white-space: pre-wrap;
+          font-size: 12px;
+          line-height: 1.5;
+          min-height: 120px;
+        }
+        .note {
+          margin-top: 16px;
+          font-size: 11px;
+          color: #6c7086;
+        }
+      </style>
+   </head>
+   <body>
+      <h1>Kurogane: Popups torture test</h1>
+      <div class="controls">
+         <button onclick="openPopup()">Open Popup</button>
+         <button onclick="openMany(10)">Open 10 Popups</button>
+         <button onclick="openMany(25)">Open 25 Popups</button>
+         <input id="count" type="number" min="1" max="1000" value="10" />
+         <button onclick="openCustomCount()">Open N</button>
+      </div>
+      <pre id="output">Click "Dump Registry" to view ownership graph.</pre>
+      <p class="note">Right-click → Inspect to open DevTools. Popups are given unique names so they create distinct windows.</p>
+      <script>
+        let popupCounter = 0;
+        const openPopups = [];
+
+        function openPopup() {
+            popupCounter += 1;
+            const name = 'popup_' + popupCounter;
+            const w = window.open('about:blank', name, 'width=500,height=400');
+            if (w) openPopups.push(w);
+        }
+
+        function openMany(n) {
+            for (let i = 0; i < n; i++) {
+                openPopup();
+            }
+        }
+
+        function openCustomCount() {
+            const n = Math.max(1, Math.min(1000, parseInt(document.getElementById('count').value || '1', 10)));
+            openMany(n);
+        }
+      </script>
+   </body>
+</html>
