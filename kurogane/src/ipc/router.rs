@@ -5,7 +5,7 @@
 use cef::*;
 use std::sync::Arc;
 use crate::ipc::protocol::{get_kind, IpcMsgKind};
-use crate::ipc::browser_state::IpcDispatcher;
+use crate::ipc::browser_state::{IpcDispatcher, IpcContext};
 use crate::ipc::renderer_state::outgoing_shm;
 use crate::ipc::{rpc, binary};
 use crate::debug;
@@ -14,6 +14,7 @@ pub fn route_browser(
     frame: &mut Frame,
     args: &ListValue,
     dispatcher: &Arc<IpcDispatcher>,
+    ctx: IpcContext,
 ) -> bool {
     let kind = match get_kind(args) {
         Some(k) => k,
@@ -36,7 +37,7 @@ pub fn route_browser(
             let command = list_get_string(args, 2);
             let payload = list_get_string(args, 3);
 
-            rpc::handle_invoke(frame, id, command, payload, dispatcher);
+            rpc::handle_invoke(frame, id, command, payload, dispatcher, ctx);
         }
 
         // Binary invoke
@@ -51,7 +52,7 @@ pub fn route_browser(
 
                 debug!("[IPC Browser] inline binary: {} bytes", written);
 
-                binary::handle_invoke(frame, id, command, &buf, dispatcher);
+                binary::handle_invoke(frame, id, command, &buf, dispatcher, ctx);
                 return true;
             }
 
@@ -83,7 +84,7 @@ pub fn route_browser(
                         command, id, data.len()
                     );
 
-                    binary::handle_invoke(frame, id, command, data, dispatcher);
+                    binary::handle_invoke(frame, id, command, data, dispatcher, ctx);
                 })?;
 
                 Ok(())

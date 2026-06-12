@@ -1,6 +1,6 @@
 use cef::{args::Args, sys::cef_window_handle_t, *};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cef_app::KuroganeApp;
 use crate::client::KuroganeClient;
@@ -9,6 +9,7 @@ use crate::gpu::GpuMode;
 use crate::chromium_flags::ChromiumFlag;
 use crate::fs::CanonicalRoot;
 use crate::ShutdownSignal;
+use crate::browser_registry::{BrowserRegistry, BrowserId, BrowserType};
 use kurogane_layout::{detect_cef_root, validate_cef_root, profile_dir};
 use crate::ipc::IpcDispatcher;
 use crate::debug;
@@ -181,7 +182,7 @@ wrap_task! {
 pub(crate) struct RuntimeState {
     shutdown_signal: ShutdownSignal,
     dispatcher: Arc<IpcDispatcher>,
-    browser_ref_count: Arc<AtomicUsize>,
+    registry: Arc<Mutex<BrowserRegistry>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -229,12 +230,43 @@ fn native_to_cef_window(
 }
 
 pub struct BrowserHandle {
-    inner: cef::Browser,
+    id: BrowserId,
+    registry: Arc<Mutex<BrowserRegistry>>,
 }
 
 impl BrowserHandle {
+    pub fn id(&self) -> BrowserId {
+        self.id
+    }
+
     pub fn close(&self, force: bool) {
-        self.inner.host().map(|h| h.close_browser(force as i32));
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.host().map(|h| h.close_browser(force as i32));
+        }
+    }
+
+    pub fn notify_resized(&self) {
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.host().map(|h| h.was_resized());
+        }
+    }
+
+    pub fn notify_move_or_resize_started(&self) {
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.host().map(|h| h.notify_move_or_resize_started());
+        }
     }
 }
 
@@ -251,6 +283,11 @@ impl RuntimeHandle {
     /// e.g. the window was closed or Ctrl+C was received.
     pub fn should_shutdown(&self) -> bool {
         self.state.shutdown_signal.is_shutdown_requested()
+    }
+
+    /// Returns the number of currently live browser instances.
+    pub fn browser_count(&self) -> usize {
+        self.state.registry.lock().unwrap().count()
     }
 
     /// Perform orderly CEF shutdown.
@@ -285,6 +322,34 @@ impl RuntimeHandle {
         url: &str,
     ) -> Option<BrowserHandle>
     {
+        self.create_child_browser_impl(parent, bounds, url, None)
+    }
+
+    /// Creates a child browser with a custom request context (separate cookie/cache partition).
+    ///
+    /// Same as create_child_browser but accepts RequestContextSettings to control
+    /// the cache partition, cookie persistence and accept language for this browser.
+    ///
+    /// The runtime must have been started with Runtime::start_embedded.
+    pub fn create_child_browser_with_request_context(
+        &self,
+        parent: *mut std::ffi::c_void,
+        bounds: BrowserBounds,
+        url: &str,
+        rc_settings: &cef::RequestContextSettings,
+    ) -> Option<BrowserHandle>
+    {
+        let rc = cef::request_context_create_context(Some(rc_settings), None);
+        self.create_child_browser_impl(parent, bounds, url, rc)
+    }
+    fn create_child_browser_impl(
+        &self,
+        parent: *mut std::ffi::c_void,
+        bounds: BrowserBounds,
+        url: &str,
+        request_context: Option<cef::RequestContext>,
+    ) -> Option<BrowserHandle>
+    {
         let info = WindowInfo {
             runtime_style: RuntimeStyle::ALLOY,
             ..WindowInfo::default()
@@ -298,17 +363,25 @@ impl RuntimeHandle {
             },
         );
 
-        let mut client = KuroganeClient::new(self.state.dispatcher.clone(), self.state.shutdown_signal.clone(), self.state.browser_ref_count.clone());
+        let mut client = KuroganeClient::new(self.state.dispatcher.clone(), self.state.shutdown_signal.clone(), self.state.registry.clone());
 
-        browser_host_create_browser_sync(
+        let mut rc = request_context;
+        let browser = browser_host_create_browser_sync(
             Some(&info),
             Some(&mut client),
             Some(&CefString::from(url)),
             Some(&Default::default()),
             None,
+            rc.as_mut(),
+        )?;
+
+        let id = self.state.registry.lock().unwrap().register_with_context(
+            browser.clone(),
+            BrowserType::Main,
             None,
-        )
-        .map(|b| BrowserHandle { inner: b })
+            rc,
+        );
+        Some(BrowserHandle { id, registry: self.state.registry.clone() })
     }
 }
 
@@ -342,14 +415,14 @@ fn initialize_cef(
     let args = Args::new();
     let window = Arc::new(Mutex::new(None));
     let window_creation_started = Arc::new(AtomicBool::new(false));
-    let browser_ref_count = Arc::new(AtomicUsize::new(0));
 
     let shutdown_signal = ShutdownSignal::new();
+    let registry = Arc::new(Mutex::new(BrowserRegistry::new(shutdown_signal.clone())));
 
     // ONE app for ALL processes
     let mut app: App = KuroganeApp::new(
         window.clone(),
-        browser_ref_count.clone(),
+        registry.clone(),
         shutdown_signal.clone(),
         CefString::from(start_url.as_str()),
         asset_root,
@@ -389,7 +462,7 @@ fn initialize_cef(
     Ok(RuntimeState {
         shutdown_signal,
         dispatcher,
-        browser_ref_count,
+        registry,
     })
 }
 

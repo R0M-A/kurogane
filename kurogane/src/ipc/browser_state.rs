@@ -8,6 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::ipc::protocol::IpcId;
 use crate::ipc::transport::shm::SharedBuffer;
+use crate::browser_registry::BrowserId;
 
 // Handler types
 
@@ -21,6 +22,13 @@ pub type BinaryHandler = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, String> + Send + S
 pub struct IpcDispatcher {
     handlers: HashMap<String, IpcHandler>,
     binary_handlers: HashMap<String, BinaryHandler>,
+}
+
+/// Contextual information for an IPC dispatch call.
+/// Carries browser identity without modifying handler signatures.
+pub struct IpcContext {
+    pub browser_id: Option<BrowserId>,
+    pub frame_id: Option<i64>,
 }
 
 impl IpcDispatcher {
@@ -43,6 +51,18 @@ impl IpcDispatcher {
             Some(h) => h(payload),
             None => Err(format!("[IPC] unknown binary command '{command}'")),
         }
+    }
+
+    /// Dispatch a JSON command with browser context.
+    /// Currently delegates to dispatch - handlers do not yet receive IpcContext.
+    pub fn dispatch_with_context(&self, command: &str, payload: &str, _ctx: IpcContext) -> IpcResult {
+        self.dispatch(command, payload)
+    }
+
+    /// Dispatch a binary command with browser context.
+    /// Currently delegates to dispatch_binary - handlers do not yet receive IpcContext.
+    pub fn dispatch_binary_with_context(&self, command: &str, payload: &[u8], _ctx: IpcContext) -> Result<Vec<u8>, String> {
+        self.dispatch_binary(command, payload)
     }
 }
 

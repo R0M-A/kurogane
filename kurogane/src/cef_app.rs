@@ -2,7 +2,7 @@
 
 use cef::*;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool};
 use std::cell::RefCell;
 
 use crate::browser::KuroganeBrowserProcessHandler;
@@ -14,13 +14,14 @@ use crate::chromium_flags::{ChromiumFlag, ChromiumFlags};
 use crate::gpu::{GpuMode, apply_gpu_flags};
 use crate::sandbox::apply_sandbox_flags;
 use crate::ShutdownSignal;
+use crate::browser_registry::BrowserRegistry;
 
 use cef::sys::cef_scheme_options_t::*;
 
 wrap_app! {
     pub struct KuroganeApp {
         window: Arc<Mutex<Option<Window>>>,
-        browser_ref_count: Arc<AtomicUsize>,
+        registry: Arc<Mutex<BrowserRegistry>>,
         shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
@@ -89,7 +90,7 @@ wrap_app! {
             Some(
                 KuroganeBrowserProcessHandler::new(
                     self.window.clone(),
-                    self.browser_ref_count.clone(),
+                    self.registry.clone(),
                     self.shutdown_signal.clone(),
                     self.start_url.clone(),
                     self.asset_root.clone(),

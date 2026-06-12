@@ -12,12 +12,13 @@ use crate::fs::CanonicalRoot;
 use crate::client::KuroganeClient;
 use crate::ipc::IpcDispatcher;
 use crate::ShutdownSignal;
+use crate::browser_registry::BrowserRegistry;
 use crate::debug;
 
 wrap_browser_process_handler! {
     pub struct KuroganeBrowserProcessHandler {
         window: Arc<Mutex<Option<Window>>>,
-        browser_ref_count: Arc<AtomicUsize>,
+        registry: Arc<Mutex<BrowserRegistry>>,
         shutdown_signal: ShutdownSignal,
         start_url: CefString,
         asset_root: Option<CanonicalRoot>,
@@ -76,17 +77,21 @@ wrap_browser_process_handler! {
                 return;
             }
 
-            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.browser_ref_count.clone());
+            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.registry.clone());
             let url = self.start_url.clone();
 
             debug!("Creating main browser with URL: {}", url.to_string());
 
             debug!("Creating BrowserView");
+
+            let mut bv_delegate = crate::window::KuroganeBrowserViewDelegate::new(self.registry.clone());
+
             let browser_view = browser_view_create(
                 Some(&mut client),
                 Some(&url),
                 Some(&Default::default()),
-                None, None, None,
+                None, None,
+                Some(&mut bv_delegate),
             )
             .expect("unrecoverable: browser_view_create failed");
 

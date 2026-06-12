@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use crate::ipc::protocol::{IpcId, IpcMsgKind, set_kind};
 use crate::ipc::transport::shm::{SharedBuffer, SHM_THRESHOLD, SHM_HEADER_SIZE};
 use crate::ipc::renderer_state::{outgoing_shm, registry};
-use crate::ipc::browser_state::response_shm_store;
+use crate::ipc::browser_state::{response_shm_store, IpcContext};
 use crate::ipc::IpcDispatcher;
 use crate::debug;
 
@@ -21,9 +21,10 @@ pub fn handle_invoke(
     command: String,
     data: &[u8],
     dispatcher: &Arc<IpcDispatcher>,
+    ctx: IpcContext,
 ) {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        dispatcher.dispatch_binary(&command, data)
+        dispatcher.dispatch_binary_with_context(&command, data, ctx)
     }))
     .unwrap_or_else(|_| Err("Binary handler panicked".to_string()));
 

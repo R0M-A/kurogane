@@ -2,9 +2,9 @@
 
 use cef::*;
 use crate::debug;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use crate::ipc::IpcDispatcher;
+use crate::browser_registry::{BrowserRegistry, BrowserType};
 use crate::ShutdownSignal;
 
 //
@@ -12,21 +12,30 @@ use crate::ShutdownSignal;
 //
 wrap_life_span_handler! {
     pub struct KuroganeLifeSpanHandler {
-        shutdown_signal: ShutdownSignal,
-        browser_ref_count: Arc<AtomicUsize>,
+        registry: Arc<Mutex<BrowserRegistry>>,
     }
 
     impl LifeSpanHandler {
-        fn on_after_created(&self, _browser: Option<&mut Browser>) {
-            debug!("on_before_close");
-            self.browser_ref_count.fetch_add(1, Ordering::SeqCst);
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
+            if let Some(b) = browser {
+                let mut reg = self.registry.lock().unwrap();
+                // Only register if not already registered
+                // Popups are registered by BrowserViewDelegate::on_popup_browser_view_created
+                if reg.find_id_by_browser(b).is_none() {
+                    let clone = b.clone();
+                    reg.register(clone, BrowserType::Main, None);
+                }
+            }
         }
 
-        fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            debug!("on_before_close");
-            if self.browser_ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                self.shutdown_signal.request_shutdown();
-                debug!("Browser destroyed");
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            debug!("on_before_close: Native window destroyed, browser object destroyed");
+            if let Some(b) = browser {
+                let mut reg = self.registry.lock().unwrap();
+                if let Some(id) = reg.find_id_by_browser(b) {
+                    reg.unregister(id);
+                    debug!("Browser {} destroyed", id.as_u32());
+                }
             }
         }
     }
@@ -85,7 +94,7 @@ wrap_client! {
     pub struct KuroganeClient {
         dispatcher: Arc<IpcDispatcher>,
         shutdown_signal: ShutdownSignal,
-        browser_ref_count: Arc<AtomicUsize>,
+        registry: Arc<Mutex<BrowserRegistry>>,
     }
 
     impl Client {
@@ -94,7 +103,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(KuroganeLifeSpanHandler::new(self.shutdown_signal.clone(), self.browser_ref_count.clone()))
+            Some(KuroganeLifeSpanHandler::new(self.registry.clone()))
         }
 
         fn on_process_message_received(
@@ -113,8 +122,14 @@ wrap_client! {
             let frame = frame.unwrap();
             let msg = message.unwrap();
 
-            // Delegate to IPC dispatcher
-            if crate::ipc::handle_ipc_message(browser, frame, msg, &self.dispatcher) {
+            // Resolve browser identity from the registry
+            let browser_id = {
+                let reg = self.registry.lock().unwrap();
+                reg.find_id_by_browser(browser)
+            };
+
+            // Delegate to IPC dispatcher with browser context
+            if crate::ipc::handle_ipc_message(browser, frame, msg, &self.dispatcher, browser_id) {
                 return 1;
             }
 

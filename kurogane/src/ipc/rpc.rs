@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use crate::ipc::protocol::{set_kind, IpcMsgKind, IpcId};
 use crate::ipc::renderer_state::registry;
-use crate::ipc::browser_state::{IpcDispatcher, IpcResult};
+use crate::ipc::browser_state::{IpcDispatcher, IpcResult, IpcContext};
 use crate::debug;
 
 // Browser
@@ -18,11 +18,12 @@ pub fn handle_invoke(
     command: String,
     payload: String,
     dispatcher: &Arc<IpcDispatcher>,
+    ctx: IpcContext,
 ) {
     debug!("[RPC Browser] invoke '{}' id={}", command, id);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        dispatcher.dispatch(&command, &payload)
+        dispatcher.dispatch_with_context(&command, &payload, ctx)
     }))
     .unwrap_or_else(|_| Err("IPC handler panicked".to_string()));
 
