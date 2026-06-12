@@ -578,6 +578,12 @@ impl RuntimeHandle {
             window_id,
             browser_view,
             self.state.window_registry.clone(),
+            Rect {
+                x: options.bounds.x,
+                y: options.bounds.y,
+                width: options.bounds.width,
+                height: options.bounds.height,
+            },
         );
 
         window_create_top_level(Some(&mut delegate))

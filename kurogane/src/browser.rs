@@ -100,6 +100,7 @@ wrap_browser_process_handler! {
                 window_id,
                 browser_view,
                 self.window_registry.clone(),
+                Rect::default(),
             );
 
             // Create window

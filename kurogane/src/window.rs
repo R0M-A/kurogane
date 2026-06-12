@@ -16,6 +16,7 @@ wrap_window_delegate! {
         window_id: WindowId,
         browser_view: BrowserView,
         registry: Arc<Mutex<WindowRegistry>>,
+        initial_bounds: Rect,
     }
 
     impl ViewDelegate {
@@ -32,6 +33,10 @@ wrap_window_delegate! {
     impl PanelDelegate {}
 
     impl WindowDelegate {
+        fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
+            self.initial_bounds.clone()
+        }
+
         fn on_window_created(&self, window: Option<&mut Window>) {
             if let Some(window) = window {
                 // Register window first so on_after_created can find and link it
