@@ -10,7 +10,7 @@ use crate::chromium_flags::ChromiumFlag;
 use crate::fs::CanonicalRoot;
 use crate::ShutdownSignal;
 use crate::browser_registry::{BrowserRegistry, BrowserId, BrowserType};
-use crate::window_registry::WindowRegistry;
+use crate::window_registry::{WindowRegistry, WindowId};
 use kurogane_layout::{detect_cef_root, validate_cef_root, profile_dir};
 use crate::ipc::IpcDispatcher;
 use crate::debug;
@@ -180,7 +180,6 @@ pub(crate) struct RuntimeState {
     shutdown_signal: ShutdownSignal,
     dispatcher: Arc<IpcDispatcher>,
     registry: Arc<Mutex<BrowserRegistry>>,
-    #[allow(dead_code)]
     window_registry: Arc<Mutex<WindowRegistry>>,
 }
 
@@ -287,6 +286,29 @@ impl RuntimeHandle {
     /// Returns the number of currently live browser instances.
     pub fn browser_count(&self) -> usize {
         self.state.registry.lock().unwrap().count()
+    }
+
+    /// Returns the number of currently open windows.
+    pub fn window_count(&self) -> usize {
+        self.state.window_registry.lock().unwrap().count()
+    }
+
+    /// Returns the IDs of all open windows.
+    pub fn window_ids(&self) -> Vec<WindowId> {
+        let reg = self.state.window_registry.lock().unwrap();
+        reg.iter().map(|(id, _)| *id).collect()
+    }
+
+    /// Close all open windows.
+    pub fn close_all_windows(&self) {
+        let reg = self.state.window_registry.lock().unwrap();
+        reg.close_all_windows();
+    }
+
+    /// Look up the window that hosts a given browser, if any.
+    pub fn find_window_by_browser(&self, browser_id: BrowserId) -> Option<WindowId> {
+        self.state.window_registry.lock().unwrap()
+            .window_id_for_browser(browser_id)
     }
 
     /// Perform orderly CEF shutdown.
@@ -460,7 +482,6 @@ fn initialize_cef(
         shutdown_signal,
         dispatcher,
         registry,
-        #[allow(dead_code)]
         window_registry,
     })
 }
