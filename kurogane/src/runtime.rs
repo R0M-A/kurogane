@@ -181,6 +181,7 @@ pub(crate) struct RuntimeState {
     dispatcher: Arc<IpcDispatcher>,
     registry: Arc<Mutex<BrowserRegistry>>,
     window_registry: Arc<Mutex<WindowRegistry>>,
+    ui_thread_id: std::thread::ThreadId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -230,14 +231,25 @@ fn native_to_cef_window(
 pub struct BrowserHandle {
     id: BrowserId,
     registry: Arc<Mutex<BrowserRegistry>>,
+    ui_thread_id: std::thread::ThreadId,
 }
 
 impl BrowserHandle {
+    fn assert_ui_thread(&self) {
+        debug_assert_eq!(
+            std::thread::current().id(),
+            self.ui_thread_id,
+            "BrowserHandle methods must be called from the UI thread where the runtime was initialized"
+        );
+    }
+
     pub fn id(&self) -> BrowserId {
+        self.assert_ui_thread();
         self.id
     }
 
     pub fn close(&self, force: bool) {
+        self.assert_ui_thread();
         let browser = {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
@@ -248,6 +260,7 @@ impl BrowserHandle {
     }
 
     pub fn notify_resized(&self) {
+        self.assert_ui_thread();
         let browser = {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
@@ -258,6 +271,7 @@ impl BrowserHandle {
     }
 
     pub fn notify_move_or_resize_started(&self) {
+        self.assert_ui_thread();
         let browser = {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
@@ -265,6 +279,179 @@ impl BrowserHandle {
         if let Some(b) = browser {
             b.host().map(|h| h.notify_move_or_resize_started());
         }
+    }
+
+    /// Navigate the main frame to the given URL.
+    pub fn navigate(&self, url: &str) {
+        self.assert_ui_thread();
+
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+
+        if let Some(b) = browser {
+            if let Some(frame) = b.main_frame() {
+                let url = CefString::from(url);
+                frame.load_url(Some(&url));
+            }
+        }
+    }
+
+    /// Reload the current page.
+    pub fn reload(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.reload();
+        }
+    }
+
+    /// Reload the current page, ignoring cached content.
+    pub fn reload_ignore_cache(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.reload_ignore_cache();
+        }
+    }
+
+    /// Navigate back in history, if possible.
+    pub fn go_back(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.go_back();
+        }
+    }
+
+    /// Navigate forward in history, if possible.
+    pub fn go_forward(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.go_forward();
+        }
+    }
+
+    /// Returns true if the browser can go back.
+    pub fn can_go_back(&self) -> bool {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        browser.map(|b| b.can_go_back() != 0).unwrap_or(false)
+    }
+
+    /// Returns true if the browser can go forward.
+    pub fn can_go_forward(&self) -> bool {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        browser.map(|b| b.can_go_forward() != 0).unwrap_or(false)
+    }
+
+    /// Returns true if the browser is currently loading.
+    pub fn is_loading(&self) -> bool {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        browser.map(|b| b.is_loading() != 0).unwrap_or(false)
+    }
+
+    /// Returns the current URL of the main frame.
+    pub fn url(&self) -> String {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        browser
+            .and_then(|b| b.main_frame())
+            .map(|f| {
+                let c: CefString = (&f.url()).into();
+                c.to_string()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Execute JavaScript in the main frame.
+    pub fn execute_javascript(&self, code: &str, script_url: &str, start_line: i32) {
+        self.assert_ui_thread();
+
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+
+        if let Some(b) = browser {
+            if let Some(frame) = b.main_frame() {
+                let code = CefString::from(code);
+                let script_url = CefString::from(script_url);
+
+                frame.execute_java_script(
+                    Some(&code),
+                    Some(&script_url),
+                    start_line,
+                );
+            }
+        }
+    }
+
+    /// Open DevTools for this browser.
+    pub fn show_devtools(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.host().map(|h| {
+                h.show_dev_tools(None, None, None, None);
+            });
+        }
+    }
+
+    /// Close DevTools if open.
+    pub fn close_devtools(&self) {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        if let Some(b) = browser {
+            b.host().map(|h| h.close_dev_tools());
+        }
+    }
+
+    /// Returns true if DevTools is currently open for this browser.
+    pub fn has_devtools(&self) -> bool {
+        self.assert_ui_thread();
+        let browser = {
+            let reg = self.registry.lock().unwrap();
+            reg.get(self.id).map(|s| s.browser.clone())
+        };
+        browser
+            .and_then(|b| b.host())
+            .map(|h| h.has_dev_tools() != 0)
+            .unwrap_or(false)
     }
 }
 
@@ -434,7 +621,7 @@ impl RuntimeHandle {
             None,
             rc,
         );
-        Some(BrowserHandle { id, registry: self.state.registry.clone() })
+        Some(BrowserHandle { id, registry: self.state.registry.clone(), ui_thread_id: self.state.ui_thread_id })
     }
 }
 
@@ -515,6 +702,7 @@ fn initialize_cef(
         dispatcher,
         registry,
         window_registry,
+        ui_thread_id: std::thread::current().id(),
     })
 }
 
