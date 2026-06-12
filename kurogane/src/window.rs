@@ -34,18 +34,19 @@ wrap_window_delegate! {
     impl WindowDelegate {
         fn on_window_created(&self, window: Option<&mut Window>) {
             if let Some(window) = window {
-                let view = self.browser_view.clone();
-                window.add_child_view(Some(&mut (&view).into()));
-                window.show();
-                debug!("Window shown");
-
-                // Register in window registry (browser_id set later from on_after_created)
+                // Register window first so on_after_created can find and link it
                 let mut reg = self.registry.lock().unwrap();
                 reg.insert(
                     self.window_id,
                     window.clone(),
                     None,
                 );
+                drop(reg);
+
+                let view = self.browser_view.clone();
+                window.add_child_view(Some(&mut (&view).into()));
+                window.show();
+                debug!("Window shown");
             }
         }
 
