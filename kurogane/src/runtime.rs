@@ -9,7 +9,7 @@ use crate::gpu::GpuMode;
 use crate::chromium_flags::ChromiumFlag;
 use crate::fs::CanonicalRoot;
 use crate::ShutdownSignal;
-use crate::browser_registry::{BrowserRegistry, BrowserId, BrowserType, BrowserMetadata};
+use crate::browser_registry::{BrowserRegistry, BrowserId, BrowserMetadata};
 use crate::window_registry::{WindowRegistry, WindowId, WindowMetadata};
 use crate::window::{KuroganeWindowDelegate, KuroganeBrowserViewDelegate};
 use kurogane_layout::{detect_cef_root, validate_cef_root, profile_dir};
@@ -748,13 +748,15 @@ impl RuntimeHandle {
             rc.as_mut(),
         )?;
 
-        let id = self.state.registry.lock().unwrap().register_with_context(
-            browser.clone(),
-            BrowserType::Main,
-            None,
-            rc,
-        );
         debug!("create_child_browser_impl cef_id={}", browser.identifier());
+
+        let id = {
+            let reg = self.state.registry.lock().unwrap();
+
+            reg.find_id_by_cef_id(browser.identifier())
+                .expect("browser should have been registered by on_after_created")
+        };
+
         Some(BrowserHandle { id, registry: self.state.registry.clone(), ui_thread_id: self.state.ui_thread_id })
     }
 }

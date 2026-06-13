@@ -43,13 +43,21 @@ wrap_life_span_handler! {
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             debug!("on_before_close called");
             if let Some(b) = browser {
-                debug!("on_before_close cef_id={}",b.identifier());
+                debug!("on_before_close cef_id={}", b.identifier());
                 let mut reg = self.registry.lock().unwrap();
                 if let Some(id) = reg.find_id_by_browser(b) {
                     reg.unregister(id);
                     debug!("Browser {} destroyed", id.as_u32());
                     if reg.is_empty() {
                         debug!("[BrowserRegistry] last browser removed, quitting message loop");
+
+                        // quit_message_loop() is only meaningful when CEF owns the main loop
+                        //
+                        // In embedded mode the host event loop owns shutdown and this call is effectively a no-op.
+                        //
+                        // TODO: Move shutdown coordination behind a single runtime lifecycle abstraction instead of
+                        // mixing quit_message_loop() and shutdown_signal.
+
                         quit_message_loop();
                     }
                 }
@@ -153,5 +161,11 @@ wrap_client! {
 
             0
         }
+    }
+}
+
+impl Drop for KuroganeClient {
+    fn drop(&mut self) {
+        debug!("KuroganeClient dropped");
     }
 }

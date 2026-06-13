@@ -119,8 +119,12 @@ impl BrowserRegistry {
         self.browsers.get_mut(&id)
     }
 
+    pub fn find_id_by_cef_id(&self, cef_id: i32) -> Option<BrowserId> {
+        self.lookup.get(&cef_id).copied()
+    }
+
     pub fn find_id_by_browser(&self, browser: &Browser) -> Option<BrowserId> {
-        self.lookup.get(&browser.identifier()).copied()
+        self.find_id_by_cef_id(browser.identifier())
     }
 
     pub fn set_opener(&mut self, id: BrowserId, opener_id: Option<BrowserId>) {
