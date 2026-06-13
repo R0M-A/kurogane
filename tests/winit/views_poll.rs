@@ -1,3 +1,15 @@
+//! Winit + Kurogane: Views mode (polling)
+//!
+//! CEF owns the native window via the Views framework.
+//! The host application owns the outer winit event loop.
+//!
+//! This example calls Kurogane's pump() on every
+//! iteration of the event loop using ControlFlow::Poll.
+//!
+//! This approach is generally useful for experimentation
+//! and debugging, but is not the most efficient production
+//! integration.
+
 use kurogane::App;
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};

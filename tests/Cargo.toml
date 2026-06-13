@@ -43,8 +43,8 @@ name = "wasm"
 path = "wasm.rs"
 
 [[bin]]
-name = "winit"
-path = "winit.rs"
+name = "winit_views_poll"
+path = "winit/views_poll.rs"
 
 [[bin]]
 name = "popups"
