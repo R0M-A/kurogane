@@ -1,8 +1,8 @@
 # Integration patterns for [`winit`](https://docs.rs/winit/latest/winit/)
 
-Kurogane supports multiple event-loop integration strategies when embedding Chromium via [winit](https://docs.rs/winit/latest/winit/). Each strategy differs in how the host process drives the [CEF message loop](https://chromiumembedded.github.io/cef/general_usage#message-loop-integration), the mechanism by which Chromium's internal scheduler dispatches I/O completions, IPC messages and renderer tasks on the browser process's main thread.
+Kurogane supports multiple event-loop integration strategies when embedding Chromium via [winit](https://docs.rs/winit/latest/winit/). Each strategy differs in how the host process drives the [Chromium message loop](https://chromiumembedded.github.io/cef/general_usage#message-loop-integration), the mechanism by which Chromium's internal scheduler dispatches I/O completions, IPC messages and renderer tasks on the browser process's main thread.
 
-> **Threading model.** CEF's browser-process main thread is a cooperative, single-threaded executor. It does not use a background pump thread. The host process is responsible for calling [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork()) (or the equivalent [`RuntimeHandle::pump`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491)) frequently enough that Chromium's internal timers and I/O completions are not starved. The strategies below differ only in *when* and *how often* the host elects to call this function.
+> **Threading model.** Chromium's browser-process main thread is a cooperative, single-threaded executor. It does not use a background pump thread. The host process is responsible for calling [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork()) frequently enough that Chromium's internal timers and I/O completions are not starved. The strategies below differ only in *when* and *how often* the host elects to call this function.
 
 ## Strategy Comparison
 
@@ -10,10 +10,10 @@ Kurogane supports multiple event-loop integration strategies when embedding Chro
 |---|---|---|---|---|---|
 | [`views_poll.rs`](views_poll.rs) | `Poll` | Every loop iteration | Highest | Trivial | Quick debugging / experimentation |
 | [`views_timer.rs`](views_timer.rs) | `WaitUntil` | Fixed 16 ms interval | Moderate | Low | Simple integrations without proxies |
-| [`views_scheduler.rs`](views_scheduler.rs) | `Wait` + wakeup | On CEF scheduler callback | Lowest | Medium | Standard production apps (CEF Windows) |
-| [`host_window.rs`](host_window.rs) | `Wait` + wakeup | On CEF scheduler callback | Lowest | Advanced | Custom windowing / embedding into existing UI |
+| [`views_scheduler.rs`](views_scheduler.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Medium | Standard production apps (Chromium Windows) |
+| [`host_window.rs`](host_window.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Advanced | Custom windowing / embedding into existing UI |
 
-> **Views vs. Embedded.** The first three examples use [CEF's Views framework](https://github.com/chromiumembedded/cef/tree/master/include/views), where [`CefBrowserView`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefBrowserView.html) owns the native window. Host-managed native window embedding example ([`host_window.rs`](host_window.rs)) inverts this: the host creates the native window via [`winit`](https://docs.rs/winit/latest/winit/) and attaches Chromium as a child-window browser via [`CefWindowInfo::SetAsChild`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefWindowInfo.html). The event loop and window lifecycle management differs significantly between these two modes; see the native embedded integrator for details.
+> **Views vs. Embedded.** The first three examples use [Chromium's Views framework](https://github.com/chromiumembedded/cef/tree/master/include/views), where [`CefBrowserView`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefBrowserView.html) owns the native window. Host-managed native window embedding example ([`host_window.rs`](host_window.rs)) inverts this: the host creates the native window via [`winit`](https://docs.rs/winit/latest/winit/) and attaches Chromium as a child-window browser via [`CefWindowInfo::SetAsChild`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefWindowInfo.html). The event loop and window lifecycle management differs significantly between these two modes; see the native embedded integrator for details.
 
 ## Continuous polling loop _(aka the Brute-forcer)_
 
@@ -33,14 +33,14 @@ event_loop.run(move |event, _, control_flow| {
 ```
 
 * **Cadence:** [`ControlFlow::Poll`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.Poll) executes every iteration. Kurogane is pumped continuously at an unbounded rate.
-* **CPU profile:** Continuous 100% single-core saturation when idle. This matches the documented worst-case behavior of [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork()).
+* **CPU profile:** Highest idle CPU usage. This matches the documented worst-case behavior of [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork()).
 * **Complexity:** No scheduler integration is required; Kurogane's `App::scheduler` callback is not invoked.
 
 **Use when:** you want the minimum amount of code needed for disposable testing or debugging where performance profiling is not the objective.
 
 ## Fixed-interval timer loop _(aka the Clockwatcher)_
 
-A fixed-interval pump using winit's [`ControlFlow::WaitUntil`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.WaitUntil). The host wakes every 16 ms (~60 Hz) and calls Kurogane's [`RuntimeHandle::pump`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491), approximating the behaviour of a naïve `SetTimer`-based integration common in legacy Win32 CEF hosts.
+A fixed-interval pump using winit's [`ControlFlow::WaitUntil`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.WaitUntil). The host wakes every 16 ms (~60 Hz) and calls Kurogane's [`RuntimeHandle::pump`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491), approximating the behaviour of a naive `SetTimer`-based integration common in legacy Win32 Chromium hosts.
 
 ```rust
 const PUMP_INTERVAL: Duration = Duration::from_millis(16);
@@ -66,13 +66,13 @@ event_loop.run(move |event, _, control_flow| {
 
 ## Reactive event-driven loop _(aka the Caped crusader)_
 
-The recommended integration for Views-mode deployments. Instead of a fixed timer, the host registers a scheduler callback via Kurogane's `App::scheduler`. CEF calls this callback whenever it has computed a deadline for its next required pump, derived from its internal [`base::MessageLoop`](https://source.chromium.org/chromium/chromium/src/+/main:base/message_loop/message_loop.h) timer queue. The host converts this deadline into a [`ControlFlow::WaitUntil`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.WaitUntil), allowing winit to sleep until either a native OS event or a CEF-requested wakeup occurs, whichever comes first.
+The recommended integration for Views-mode deployments. Instead of a fixed timer, the host registers a scheduler callback via Kurogane's `App::scheduler`. Chromium calls this callback whenever it has computed a deadline for its next required pump, derived from its internal [`base::MessageLoop`](https://source.chromium.org/chromium/chromium/src/+/main:base/message_loop/message_loop.h) timer queue. The host converts this deadline into a [`ControlFlow::WaitUntil`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.WaitUntil), allowing winit to sleep until either a native OS event or a Chromium-requested wakeup occurs, whichever comes first.
 
 ```rust
 App::builder()
     .scheduler(|delay: Option<Duration>| {
-        // `delay` is None when CEF requests an immediate pump.
-        // Post a wakeup to the winit event loop proxy.
+        // delay is None when Chromium requests an immediate pump
+        // Post a wakeup to the winit event loop proxy
         event_loop_proxy
             .send_event(AppEvent::PumpScheduled(delay))
             .ok();
@@ -94,9 +94,9 @@ Event::MainEventsCleared => {
 * **Cadence:** Purely reactive. Driven by [`CefApp::OnScheduleMessagePumpWork`](https://cef-builds.spotifycdn.com/docs/108.4/classCefBrowserProcessHandler.html#a7ff7d1618399ede096ba16486a71d76e) via Kurogane's `App::scheduler`. Chromium explicitly requests a pump from the browser-process UI thread only when delayed tasks or internal work are pending.
 * **CPU profile:** Near-zero idle overhead. The host event loop sleeps indefinitely via [`ControlFlow::Wait`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html#variant.Wait) until awakened by an OS event or a Kurogane schedule request.
 * **Active profile:** Dynamically scales. Automatically matches Chromium's internal work frequency (typically matching `requestAnimationFrame` up to ~60Hz or monitor refresh rate for rAF-driven content).
-* **Threading Contract:** Kurogane's `App::scheduler` callback executes on the CEF UI thread. Crossing this boundary requires [`EventLoopProxy::send_event`](https://docs.rs/winit/latest/winit/event_loop/struct.EventLoopProxy.html) to thread-safely wake the `winit` event loop.
+* **Threading Contract:** Kurogane's `App::scheduler` callback executes on the Chromium UI thread. Crossing this boundary requires [`EventLoopProxy::send_event`](https://docs.rs/winit/latest/winit/event_loop/struct.EventLoopProxy.html) to thread-safely wake the `winit` event loop.
 
-**Use when:** building a production application where resource optimization, battery life and frame-accurate animation fidelity are critical. This is the canonical integration pattern for host-managed event loops in CEF's own [documentation on external message pumps](https://chromiumembedded.github.io/cef/general_usage#message-loop-integration).
+**Use when:** building a production application where resource optimization, battery life and frame-accurate animation fidelity are critical. This follows the external-message-pump architecture recommended for host-managed event loops in Chromium's own [documentation on external message pumps](https://chromiumembedded.github.io/cef/general_usage#message-loop-integration).
 
 ## Host-managed native window embedding _(aka the Mad scientist)_
 
@@ -120,9 +120,9 @@ host.create_browser(
 - **Window hierarchy:** The host process owns the window hierarchy. Chromium renders into a raw child surface (`HWND` / `NSView` / `XWindow`) of the `winit` window's native handle.
 - **Layout contract:** Resize events must be forwarded to the browser via [`CefBrowserHost::WasResized`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefBrowserHost.html#WasResized()), which signals the renderer process to re-layout. Failure to call this will leave the browser surface clipped or stretched.
 
-Because the host process owns the root window, teardown requires a coordinated multi-step asynchronous dance across the host thread and CEF UI thread.
+Because the host process owns the root window, teardown requires a coordinated multi-step asynchronous dance across the host thread and Chromium UI thread.
 
-The host application must not destroy the parent window handle or invoke the global CEF shutdown sequence until the following sequence has run to completion:
+The host must not invoke global Chromium shutdown until all browsers have completed their close sequence.
 
 ### Asynchronous shutdown sequence
 
@@ -134,7 +134,7 @@ The shutdown sequence for an embedded browser involves coordination across the b
 sequenceDiagram
     participant W as winit Event loop
     participant H as Host application
-    participant C as CEF UI thread
+    participant C as Chromium UI thread
 
     W->>H: WindowEvent::CloseRequested
     H->>C: close_all_browsers(true)
@@ -149,32 +149,30 @@ sequenceDiagram
     H->>W: event_loop.exit()
 ```
 
-#### CEF browser close lifecycle
+#### Standard Chromium browser close lifecycle
 
 ```mermaid
 sequenceDiagram
     participant Host as Host application
-    participant CEF as CEF UI thread
+    participant Chromium as Chromium UI thread
 
-    Host->>CEF: BrowserHandle::close(false)
+    Host->>Chromium: BrowserHandle::close(false)
 
-    CEF->>CEF: DoClose()
-    Note right of CEF: Return false to allow<br/>normal CEF shutdown
+    Chromium->>Chromium: DoClose()
+    Note right of Chromium: Return false to allow<br/>normal Chromium shutdown
 
-    CEF->>CEF: Native window closes
-    CEF->>CEF: OnBeforeClose()
+    Chromium->>Chromium: Native window closes
+    Chromium->>Chromium: OnBeforeClose()
 
-    Note right of CEF: Browser removed from registry<br/>ShutdownSignal may be set
+    Note right of Chromium: Browser removed from registry<br/>ShutdownSignal may be set
 ```
-
-> **Critical:** The host **must** continue calling Kurogane's [`RuntimeHandle::pump`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491) after requesting browser closure. [`OnBeforeClose`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) is dispatched from within [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork()). If the host stops pumping, for example, by returning early from the event loop upon receiving a `CloseRequested` window event, [`OnBeforeClose`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) will never fire and the `ShutdownSignal` will never be set. The process will hang.
 
 The correct pattern is to decouple window-close intent from event-loop exit:
 
 ```rust
 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
     // Do NOT exit the event loop here
-    // Request browser closure and let CEF drive the shutdown sequence
+    // Request browser closure and let Chromium drive the shutdown sequence
     browser_handle.close(false);
 }
 
@@ -186,7 +184,7 @@ Event::UserEvent(AppEvent::BrowserClosed) => {
 
 **Use when:** you need Chromium as a composited component within an existing application UI e.g., rendering a web-based settings panel inside a native game or tool window. This is the most flexible integration but requires the host to correctly implement the asynchronous shutdown protocol end-to-end.
 
-> **Fatal footgun:** [`OnBeforeClose`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) is dispatched *from within* [`handle.pump()`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491). If you call [`event_loop.exit()`](https://docs.rs/winit/latest/winit/event_loop/struct.EventLoop.html) immediately when `CloseRequested` fires, the loop stops pumping, CEF never fires its cleanup callbacks and the process will hang or leak dangling pointers.
+> **Fatal footgun:** Browser shutdown is asynchronous. Calling close_browser() only *initiates* browser teardown sequence. The browser is not actually destroyed until Chromium later dispatches [`OnBeforeClose`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) *from within* Kurogane's [`handle.pump()`](https://github.com/0x48piraj/kurogane/blob/86ce9810bcfa6b3b0d2f9a87f04907be7e799829/kurogane/src/runtime.rs#L491) (which internally executes [`CefDoMessageLoopWork`](https://magpcss.org/ceforum/apidocs3/projects/(default)/(_globals).html#CefDoMessageLoopWork())), after which the browser is removed from the registry. If you intercept a `CloseRequested` window event and immediately call [`event_loop.exit()`](https://docs.rs/winit/latest/winit/event_loop/struct.EventLoop.html) or drop your window structures, the host stops pumping Chromium, [`OnBeforeClose`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) never executes and the close sequence cannot complete (the `ShutdownSignal` will never be set).
 
 ## Choosing a strategy
 
@@ -195,7 +193,7 @@ flowchart TD
 
     A{"Who owns the native window?"}
 
-    A -->|Kurogane / CEF Views| B{"Do battery life or idle CPU usage matter?"}
+    A -->|Kurogane / Chromium Views| B{"Do battery life or idle CPU usage matter?"}
     A -->|Host application| E["host_window.rs"]
 
     B -->|No| C["views_poll.rs<br/>or<br/>views_timer.rs"]
@@ -217,5 +215,5 @@ flowchart TD
 
 ## References
 
-- [CEF general usage](https://chromiumembedded.github.io/cef/general_usage): Upstream architecture guide
+- [Chromium general usage](https://chromiumembedded.github.io/cef/general_usage): Upstream architecture guide
 - [LifeSpanHandler methods](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html): Browser creation and destruction lifecycle
