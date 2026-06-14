@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "kurogane"
-version = "0.0.1"
+version = "0.0.4-beta.1"
 dependencies = [
  "cef",
  "ctrlc",
@@ -1162,7 +1162,7 @@ dependencies = [
 
 [[package]]
 name = "kurogane-cli"
-version = "0.0.1"
+version = "0.0.4-beta.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "kurogane-layout"
-version = "0.0.1"
+version = "0.0.4-beta.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "kurogane-tests"
-version = "0.0.1"
+version = "0.0.4-beta.1"
 dependencies = [
  "kurogane",
  "raw-window-handle",
