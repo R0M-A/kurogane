@@ -212,11 +212,60 @@ pub struct BrowserBounds {
     pub height: i32,
 }
 
-/// Options for creating a new top-level window via RuntimeHandle::create_window.
+/// Initial visibility state for a newly created window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowState {
+    /// Show the window normally.
+    #[default]
+    Normal,
+
+    /// Create the window minimized.
+    Minimized,
+
+    /// Create the window maximized.
+    Maximized,
+
+    /// Create the window hidden.
+    Hidden,
+}
+
+impl From<WindowState> for cef::ShowState {
+    fn from(state: WindowState) -> Self {
+        match state {
+            WindowState::Normal => cef::ShowState::NORMAL,
+            WindowState::Minimized => cef::ShowState::MINIMIZED,
+            WindowState::Maximized => cef::ShowState::MAXIMIZED,
+            WindowState::Hidden => cef::ShowState::HIDDEN,
+        }
+    }
+}
+
+impl From<cef::ShowState> for WindowState {
+    fn from(state: cef::ShowState) -> Self {
+        match state {
+            cef::ShowState::NORMAL => Self::Normal,
+            cef::ShowState::MINIMIZED => Self::Minimized,
+            cef::ShowState::MAXIMIZED => Self::Maximized,
+            cef::ShowState::HIDDEN => Self::Hidden,
+            other => {
+                debug_assert!(false, "unsupported cef::ShowState: {:?}", other);
+                Self::Normal
+            }
+        }
+    }
+}
+
+/// Options for creating a new top-level browser window.
 #[derive(Debug, Clone)]
 pub struct WindowOptions {
+    /// Initial URL to load.
     pub url: String,
+
+    /// Initial window position and size.
     pub bounds: BrowserBounds,
+
+    /// Initial visibility state of the window.
+    pub show_state: WindowState,
 }
 
 /// Handle to a live initialized CEF runtime.
@@ -624,6 +673,7 @@ impl RuntimeHandle {
                 width: options.bounds.width,
                 height: options.bounds.height,
             },
+            options.show_state.into(),
             is_closing,
         );
 

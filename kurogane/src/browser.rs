@@ -130,6 +130,7 @@ wrap_browser_process_handler! {
                 browser_view,
                 self.window_registry.clone(),
                 Rect::default(),
+                ShowState::NORMAL,
                 is_closing,
             );
 

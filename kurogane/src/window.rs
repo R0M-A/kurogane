@@ -18,6 +18,7 @@ wrap_window_delegate! {
         browser_view: BrowserView,
         registry: Arc<Mutex<WindowRegistry>>,
         initial_bounds: Rect,
+        show_state: ShowState,
         is_closing: Arc<AtomicBool>,
     }
 
@@ -37,6 +38,10 @@ wrap_window_delegate! {
     impl WindowDelegate {
         fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
             self.initial_bounds.clone()
+        }
+
+        fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
+            self.show_state
         }
 
         fn on_window_created(&self, window: Option<&mut Window>) {
@@ -149,6 +154,7 @@ wrap_browser_view_delegate! {
                     bv_clone,
                     self.window_registry.clone(),
                     browser_id,
+                    ShowState::NORMAL,
                     is_closing,
                 );
                 if let Some(window) = window_create_top_level(Some(&mut delegate)) {
@@ -169,6 +175,7 @@ wrap_window_delegate! {
         browser_view: BrowserView,
         registry: Arc<Mutex<WindowRegistry>>,
         browser_id: Option<BrowserId>,
+        initial_show_state: ShowState,
         is_closing: Arc<AtomicBool>,
     }
 
@@ -177,6 +184,10 @@ wrap_window_delegate! {
     impl PanelDelegate {}
 
     impl WindowDelegate {
+        fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
+            self.initial_show_state
+        }
+
         fn on_window_created(&self, window: Option<&mut Window>) {
             if let Some(window) = window {
                 let view = self.browser_view.clone();
