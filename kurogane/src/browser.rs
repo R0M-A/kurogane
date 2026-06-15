@@ -13,7 +13,7 @@ use crate::ShutdownSignal;
 use crate::browser_registry::BrowserRegistry;
 use crate::window_registry::WindowRegistry;
 use crate::window::KuroganeWindowDelegate;
-use crate::app::{PumpRequest, PumpScheduler};
+use crate::app::{PumpRequest, PumpScheduler, ClientAppBrowserDelegate};
 use crate::debug;
 
 wrap_browser_process_handler! {
@@ -32,11 +32,18 @@ wrap_browser_process_handler! {
         // The host application creates its own window and embeds CEF as a child
         embedded_mode: bool,
         scheduler: Option<PumpScheduler>,
+        delegates: Vec<Arc<dyn ClientAppBrowserDelegate>>,
+        default_client_stored: RefCell<Option<Client>>,
     }
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
             debug!("on_context_initialized called");
+
+            // Dispatch to lifecycle delegates first
+            for delegate in &self.delegates {
+                delegate.on_context_initialized();
+            }
 
             // Register once per request context
             if self.scheme_factory.borrow().is_none() {
@@ -66,6 +73,23 @@ wrap_browser_process_handler! {
 
             let is_closing = Arc::new(AtomicBool::new(false));
 
+            // Check if any delegate provides a custom default client
+            let mut client: Client = {
+                let mut delegate_client = None;
+                for delegate in &self.delegates {
+                    if let Some(c) = delegate.default_client() {
+                        delegate_client = Some(c);
+                        break;
+                    }
+                }
+                delegate_client.unwrap_or_else(|| {
+                    KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.registry.clone(), self.window_registry.clone(), is_closing.clone())
+                })
+            };
+
+            // Store for subsequent default_client calls
+            *self.default_client_stored.borrow_mut() = Some(client.clone());
+
             // In embedded mode, the host application creates its own window
             // We only register scheme handlers.
             if self.embedded_mode {
@@ -73,7 +97,6 @@ wrap_browser_process_handler! {
                 return;
             }
 
-            let mut client = KuroganeClient::new(self.dispatcher.clone(), self.shutdown_signal.clone(), self.registry.clone(), self.window_registry.clone());
             let url = self.start_url.clone();
 
             debug!("Creating main browser with URL: {}", url.to_string());
@@ -116,6 +139,10 @@ wrap_browser_process_handler! {
                 .expect("unrecoverable: window_create_top_level failed");
 
             debug!("Top-level window created");
+        }
+
+        fn default_client(&self) -> Option<Client> {
+            self.default_client_stored.borrow().clone()
         }
 
         fn on_schedule_message_pump_work(&self, delay_ms: i64) {

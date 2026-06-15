@@ -15,7 +15,7 @@ use crate::sandbox::apply_sandbox_flags;
 use crate::ShutdownSignal;
 use crate::browser_registry::BrowserRegistry;
 use crate::window_registry::WindowRegistry;
-use crate::app::PumpScheduler;
+use crate::app::{PumpScheduler, ClientAppBrowserDelegate};
 
 use cef::sys::cef_scheme_options_t::*;
 
@@ -31,6 +31,7 @@ wrap_app! {
         chromium_flags: Vec<ChromiumFlag>,
         embedded_mode: bool,
         scheduler: Option<PumpScheduler>,
+        delegates: Vec<Arc<dyn ClientAppBrowserDelegate>>,
     }
 
     impl App {
@@ -39,13 +40,18 @@ wrap_app! {
             process_type: Option<&CefString>,
             command_line: Option<&mut CommandLine>,
         ) {
+            let Some(cmd) = command_line else { return };
+
+            // Dispatch to lifecycle delegates first
+            for delegate in &self.delegates {
+                delegate.on_before_command_line_processing(cmd);
+            }
+
             // Startup policy is currently only applied to the main browser process
             // Chromium propagates the relevant switches to child processes
             if process_type.is_some() {
                 return;
             }
-
-            let Some(cmd) = command_line else { return };
 
             let mut flags = ChromiumFlags::default();
 
@@ -99,6 +105,8 @@ wrap_app! {
                     RefCell::new(None),
                     self.embedded_mode,
                     self.scheduler.clone(),
+                    self.delegates.clone(),
+                    RefCell::new(None),
                 )
             )
         }

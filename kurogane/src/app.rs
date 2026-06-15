@@ -8,6 +8,7 @@ use std::time::Duration;
 use std::sync::Arc;
 use serde_json::Value;
 use std::collections::HashMap;
+use cef::*;
 use crate::app::resolver::ResolvedFrontend;
 use crate::ipc::browser_state::{IpcDispatcher, IpcHandler, BinaryHandler};
 use crate::{Runtime, RuntimeError, RuntimeHandle};
@@ -39,6 +40,39 @@ pub(crate) enum Source {
     Path(PathBuf),
 }
 
+/// Customizes browser-process startup behavior.
+///
+/// Register via App::delegate to customize browser-process startup
+/// without replacing Kurogane's built-in runtime.
+///
+/// Delegates are invoked in registration order. The first delegate
+/// returning a client from Self::default_client wins.
+pub trait ClientAppBrowserDelegate: Send + Sync {
+    /// Invoked before Chromium processes command-line arguments.
+    ///
+    /// Prefer App::chromium_flag for simple flag configuration.
+    /// This hook exists as a lower-level escape hatch.
+    fn on_before_command_line_processing(&self, _command_line: &mut CommandLine) {}
+
+    /// Invoked after the browser process has initialized its request context.
+    ///
+    /// At this point global browser-process initialization has completed and
+    /// browser creation may begin.
+    fn on_context_initialized(&self) {}
+
+    /// Supplies a custom default Client implementation.
+    ///
+    /// The returned client will be used when Kurogane creates browser
+    /// instances unless another delegate registered earlier has already
+    /// supplied one.
+    ///
+    /// Returning None defers to subsequent delegates or Kurogane's
+    /// built-in client implementation.
+    fn default_client(&self) -> Option<Client> {
+        None
+    }
+}
+
 /// Public application builder.
 ///
 /// Configures how the first browser instance starts.
@@ -52,6 +86,7 @@ pub struct App {
     gpu_mode: GpuMode,
     chromium_flags: Vec<ChromiumFlag>,
     scheduler: Option<PumpScheduler>,
+    delegates: Vec<Arc<dyn ClientAppBrowserDelegate>>,
 }
 
 impl App {
@@ -76,7 +111,14 @@ impl App {
             gpu_mode: GpuMode::Auto,
             chromium_flags: Vec::new(),
             scheduler: None,
+            delegates: Vec::new(),
         }
+    }
+
+    /// Register a browser lifecycle delegate.
+    pub fn delegate<D: ClientAppBrowserDelegate + 'static>(mut self, delegate: D) -> Self {
+        self.delegates.push(Arc::new(delegate));
+        self
     }
 
     /// Supply a scheduler callback for pump timing.
@@ -191,6 +233,7 @@ impl App {
             self.gpu_mode,
             self.chromium_flags,
             self.scheduler,
+            self.delegates,
         )
     }
 
@@ -211,6 +254,7 @@ impl App {
             self.persist_session_cookies,
             self.gpu_mode,
             self.chromium_flags,
+            self.delegates,
         )
     }
 
@@ -232,6 +276,7 @@ impl App {
             self.gpu_mode,
             self.chromium_flags,
             self.scheduler,
+            self.delegates,
         )
     }
 
