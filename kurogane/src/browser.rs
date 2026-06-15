@@ -2,6 +2,7 @@
 
 use cef::*;
 use std::cell::RefCell;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -63,6 +64,8 @@ wrap_browser_process_handler! {
                 }
             }
 
+            let is_closing = Arc::new(AtomicBool::new(false));
+
             // In embedded mode, the host application creates its own window
             // We only register scheme handlers.
             if self.embedded_mode {
@@ -104,6 +107,7 @@ wrap_browser_process_handler! {
                 browser_view,
                 self.window_registry.clone(),
                 Rect::default(),
+                is_closing,
             );
 
             // Create window

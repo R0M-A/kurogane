@@ -2,6 +2,7 @@
 
 use cef::*;
 use crate::debug;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use crate::ipc::IpcDispatcher;
 use crate::browser_registry::{BrowserRegistry, BrowserType};
@@ -15,6 +16,7 @@ wrap_life_span_handler! {
     pub struct KuroganeLifeSpanHandler {
         registry: Arc<Mutex<BrowserRegistry>>,
         window_registry: Arc<Mutex<WindowRegistry>>,
+        is_closing: Arc<AtomicBool>,
     }
 
     impl LifeSpanHandler {
@@ -38,6 +40,14 @@ wrap_life_span_handler! {
                     }
                 }
             }
+        }
+
+        fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
+            let reg = self.registry.lock().unwrap();
+            if reg.count() == 1 {
+                self.is_closing.store(true, Ordering::Release);
+            }
+            0
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
@@ -121,6 +131,7 @@ wrap_client! {
         shutdown_signal: ShutdownSignal,
         registry: Arc<Mutex<BrowserRegistry>>,
         window_registry: Arc<Mutex<WindowRegistry>>,
+        is_closing: Arc<AtomicBool>,
     }
 
     impl Client {
@@ -129,7 +140,7 @@ wrap_client! {
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(KuroganeLifeSpanHandler::new(self.registry.clone(), self.window_registry.clone()))
+            Some(KuroganeLifeSpanHandler::new(self.registry.clone(), self.window_registry.clone(), self.is_closing.clone()))
         }
 
         fn on_process_message_received(

@@ -583,11 +583,14 @@ impl RuntimeHandle {
     ///
     /// Must be called on the UI thread.
     pub fn create_window(&self, options: WindowOptions) -> Result<WindowId, RuntimeError> {
+        let is_closing = Arc::new(AtomicBool::new(false));
+
         let mut client = KuroganeClient::new(
             self.state.dispatcher.clone(),
             self.state.shutdown_signal.clone(),
             self.state.registry.clone(),
             self.state.window_registry.clone(),
+            is_closing.clone(),
         );
 
         let mut bv_delegate = KuroganeBrowserViewDelegate::new(
@@ -621,6 +624,7 @@ impl RuntimeHandle {
                 width: options.bounds.width,
                 height: options.bounds.height,
             },
+            is_closing,
         );
 
         window_create_top_level(Some(&mut delegate))
@@ -736,7 +740,8 @@ impl RuntimeHandle {
             },
         );
 
-        let mut client = KuroganeClient::new(self.state.dispatcher.clone(), self.state.shutdown_signal.clone(), self.state.registry.clone(), self.state.window_registry.clone());
+        let is_closing = Arc::new(AtomicBool::new(false));
+        let mut client = KuroganeClient::new(self.state.dispatcher.clone(), self.state.shutdown_signal.clone(), self.state.registry.clone(), self.state.window_registry.clone(), is_closing);
 
         let mut rc = request_context;
         let browser = browser_host_create_browser_sync(

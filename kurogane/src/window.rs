@@ -4,6 +4,7 @@
 //! browser view into the platform window.
 
 use cef::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::debug;
@@ -17,6 +18,7 @@ wrap_window_delegate! {
         browser_view: BrowserView,
         registry: Arc<Mutex<WindowRegistry>>,
         initial_bounds: Rect,
+        is_closing: Arc<AtomicBool>,
     }
 
     impl ViewDelegate {
@@ -82,6 +84,14 @@ wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            if self.is_closing.load(Ordering::Acquire) {
+                return 1;
+            }
+            if let Some(browser) = self.browser_view.browser() {
+                if let Some(host) = browser.host() {
+                    return host.try_close_browser();
+                }
+            }
             1
         }
     }
@@ -133,11 +143,13 @@ wrap_browser_view_delegate! {
                     reg.allocate_id()
                 };
 
+                let is_closing = Arc::new(AtomicBool::new(false));
                 let mut delegate = KuroganePopupDelegate::new(
                     window_id,
                     bv_clone,
                     self.window_registry.clone(),
                     browser_id,
+                    is_closing,
                 );
                 if let Some(window) = window_create_top_level(Some(&mut delegate)) {
                     window.show();
@@ -157,6 +169,7 @@ wrap_window_delegate! {
         browser_view: BrowserView,
         registry: Arc<Mutex<WindowRegistry>>,
         browser_id: Option<BrowserId>,
+        is_closing: Arc<AtomicBool>,
     }
 
     impl ViewDelegate {}
@@ -208,6 +221,14 @@ wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            if self.is_closing.load(Ordering::Acquire) {
+                return 1;
+            }
+            if let Some(browser) = self.browser_view.browser() {
+                if let Some(host) = browser.host() {
+                    return host.try_close_browser();
+                }
+            }
             1
         }
     }
