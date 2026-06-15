@@ -20,6 +20,7 @@ mod shutdown;
 pub mod ipc;
 pub mod bridge;
 pub mod logger;
+mod browser_info_map;
 
 #[cfg(target_os = "macos")]
 mod platform;
@@ -35,3 +36,4 @@ pub use shutdown::ShutdownSignal;
 // Re-export IPC types for public use
 pub use crate::ipc::IpcResult;
 pub use app::{PumpRequest, PumpScheduler};
+pub use browser_info_map::{BrowserInfoMap, BrowserInfoMapVisitor, BrowserInfoMapVisitorResult};

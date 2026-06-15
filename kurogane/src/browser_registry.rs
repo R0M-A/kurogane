@@ -3,7 +3,7 @@ use cef::{Browser, ImplBrowser, RequestContext};
 use crate::ShutdownSignal;
 use crate::debug;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BrowserId(u32);
 
 impl BrowserId {
