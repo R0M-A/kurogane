@@ -94,10 +94,8 @@ wrap_window_delegate! {
             if self.is_closing.load(Ordering::Acquire) {
                 return 1;
             }
-            if let Some(browser) = self.browser_view.browser() {
-                if let Some(host) = browser.host() {
-                    return host.try_close_browser();
-                }
+            if let Some(browser) = self.browser_view.browser() && let Some(host) = browser.host() {
+                return host.try_close_browser();
             }
             1
         }
@@ -239,10 +237,8 @@ wrap_window_delegate! {
             if self.is_closing.load(Ordering::Acquire) {
                 return 1;
             }
-            if let Some(browser) = self.browser_view.browser() {
-                if let Some(host) = browser.host() {
-                    return host.try_close_browser();
-                }
+            if let Some(browser) = self.browser_view.browser() && let Some(host) = browser.host() {
+                return host.try_close_browser();
             }
             1
         }

@@ -53,7 +53,7 @@ impl kurogane::ClientAppRendererDelegate for RendererDelegate {
     ) {
         if let Some(exception) = exception {
             let msg: cef::CefString = (&exception.message()).into();
-            println!("[renderer delegate] uncaught exception: {}", msg.to_string());
+            println!("[renderer delegate] uncaught exception: {}", msg);
         }
     }
 

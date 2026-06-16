@@ -150,7 +150,7 @@ wrap_render_process_handler! {
 
             let browser_ref = browser.as_deref();
             for delegate in &self.delegates {
-                delegate.on_context_created(browser_ref, Some(&frame), Some(&context));
+                delegate.on_context_created(browser_ref, Some(frame), Some(context));
             }
         }
 

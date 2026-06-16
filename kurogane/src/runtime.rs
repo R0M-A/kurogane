@@ -332,7 +332,9 @@ impl BrowserHandle {
         };
         if let Some(b) = browser {
             debug!("close browser cef_id={} is_loading={}", b.identifier(), b.is_loading());
-            b.host().map(|h| h.close_browser(force as i32));
+            if let Some(h) = b.host() {
+                h.close_browser(force as i32);
+            }
         }
     }
 
@@ -342,8 +344,8 @@ impl BrowserHandle {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
         };
-        if let Some(b) = browser {
-            b.host().map(|h| h.was_resized());
+        if let Some(b) = browser && let Some(h) = b.host() {
+            h.was_resized();
         }
     }
 
@@ -353,8 +355,8 @@ impl BrowserHandle {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
         };
-        if let Some(b) = browser {
-            b.host().map(|h| h.notify_move_or_resize_started());
+        if let Some(b) = browser && let Some(h) = b.host() {
+            h.notify_move_or_resize_started();
         }
     }
 
@@ -367,11 +369,9 @@ impl BrowserHandle {
             reg.get(self.id).map(|s| s.browser.clone())
         };
 
-        if let Some(b) = browser {
-            if let Some(frame) = b.main_frame() {
-                let url = CefString::from(url);
-                frame.load_url(Some(&url));
-            }
+        if let Some(b) = browser && let Some(frame) = b.main_frame() {
+            let url = CefString::from(url);
+            frame.load_url(Some(&url));
         }
     }
 
@@ -478,17 +478,15 @@ impl BrowserHandle {
             reg.get(self.id).map(|s| s.browser.clone())
         };
 
-        if let Some(b) = browser {
-            if let Some(frame) = b.main_frame() {
-                let code = CefString::from(code);
-                let script_url = CefString::from(script_url);
+        if let Some(b) = browser && let Some(frame) = b.main_frame() {
+            let code = CefString::from(code);
+            let script_url = CefString::from(script_url);
 
-                frame.execute_java_script(
-                    Some(&code),
-                    Some(&script_url),
-                    start_line,
-                );
-            }
+            frame.execute_java_script(
+                Some(&code),
+                Some(&script_url),
+                start_line,
+            );
         }
     }
 
@@ -499,10 +497,8 @@ impl BrowserHandle {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
         };
-        if let Some(b) = browser {
-            b.host().map(|h| {
-                h.show_dev_tools(None, None, None, None);
-            });
+        if let Some(b) = browser && let Some(h) = b.host() {
+            h.show_dev_tools(None, None, None, None);
         }
     }
 
@@ -513,8 +509,8 @@ impl BrowserHandle {
             let reg = self.registry.lock().unwrap();
             reg.get(self.id).map(|s| s.browser.clone())
         };
-        if let Some(b) = browser {
-            b.host().map(|h| h.close_dev_tools());
+        if let Some(b) = browser && let Some(h) = b.host() {
+            h.close_dev_tools();
         }
     }
 

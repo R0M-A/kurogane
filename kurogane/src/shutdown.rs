@@ -20,3 +20,9 @@ impl ShutdownSignal {
         self.inner.load(Ordering::Acquire)
     }
 }
+
+impl Default for ShutdownSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
