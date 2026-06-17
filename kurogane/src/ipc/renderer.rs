@@ -7,9 +7,11 @@ use cef::*;
 use std::sync::Arc;
 use crate::app::ClientAppRendererDelegate;
 use crate::debug;
-use crate::ipc::protocol::{set_kind, IpcMsgKind, IpcId};
-use crate::ipc::transport::shm::{SharedBuffer, SHM_THRESHOLD, SHM_HEADER_SIZE};
-use crate::ipc::renderer_state::{register_promise, clear_context_promises, outgoing_shm};
+use crate::ipc::protocol::{set_kind, IpcMsgKind};
+use crate::ipc::binary::SHM_THRESHOLD;
+use crate::ipc::transport::cef_shm;
+use crate::ipc::renderer_state::{register_promise, clear_context_promises};
+use crate::ipc::binary;
 use crate::ipc::router;
 use crate::bridge;
 
@@ -268,13 +270,29 @@ wrap_render_process_handler! {
             let name: CefString = (&msg.name()).into();
             if name.to_string() != "ipc" { return 0; }
 
-            let Some(args) = msg.argument_list() else {
-                debug!("[IPC Renderer] missing argument list");
+            let Some(frame) = frame else {
+                debug!("[IPC Renderer] missing frame");
                 return 0;
             };
 
-            let Some(frame) = frame else {
-                debug!("[IPC Renderer] missing frame");
+            // SHM-backed messages have no ListValue; dispatch by SHM header
+            if let Some(region) = msg.shared_memory_region() {
+                if let Some((kind, id)) = cef_shm::read_header(&region) {
+                    match kind {
+                        k if k == IpcMsgKind::BinaryResponse as i32 => {
+                            binary::handle_response_shm(frame, &region, id);
+                        }
+                        _ => {
+                            debug!("[IPC Renderer] unexpected SHM message kind {}", kind);
+                        }
+                    }
+                }
+                return 1;
+            }
+
+            // Inline message via ListValue
+            let Some(args) = msg.argument_list() else {
+                debug!("[IPC Renderer] missing argument list");
                 return 0;
             };
 
@@ -471,63 +489,47 @@ wrap_v8_handler! {
 
             let promise = v8_value_create_promise().unwrap();
 
-            // Build message first (no id yet)
-            let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
-            let mut msg_args = msg.argument_list().unwrap();
+            let cmd_bytes = cmd.as_bytes();
+            let cmd_len = cmd_bytes.len();
 
-            set_kind(&mut msg_args, IpcMsgKind::BinaryInvoke);
-            msg_args.set_string(2, Some(&CefString::from(cmd.as_str())));
+            if len < SHM_THRESHOLD {
+                // inline: faster for small-medium sizes
+                let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
+                let mut msg_args = msg.argument_list().unwrap();
 
-            // Build payload before committing to promise/id
-            let payload_result: Result<Option<SharedBuffer>, String> =
+                set_kind(&mut msg_args, IpcMsgKind::BinaryInvoke);
+                msg_args.set_string(2, Some(&CefString::from(cmd.as_str())));
+
                 with_array_buffer(ptr as *const u8, len, |data| {
-                    if len < SHM_THRESHOLD {
-                        // inline: faster for small-medium sizes
-                        let mut binary = binary_value_create(Some(data)).unwrap();
-                        msg_args.set_binary(3, Some(&mut binary));
-                        Ok(None)
-                    } else {
-                        // shm: only for large payloads
-                        let mut shm = SharedBuffer::create(len)?;
-                        shm.write(data)?;
-
-                        let name = shm.name();
-                        msg_args.set_string(3, Some(&CefString::from(name.as_str())));
-
-                        // SHM payloads are validated against MAX_SHM_SIZE during creation/open
-                        // and MAX_SHM_SIZE is guaranteed to fit within IpcId.
-                        msg_args.set_int(4, (len + SHM_HEADER_SIZE) as IpcId);
-
-                        Ok(Some(shm))
-                    }
+                    let mut binary = binary_value_create(Some(data)).unwrap();
+                    msg_args.set_binary(3, Some(&mut binary));
                 });
 
-            let shm = match payload_result {
-                Ok(shm) => shm,
-                Err(e) => {
-                    let msg = CefString::from(e.as_str());
-                    // Payload construction failed before promise registration.
-                    // Reject directly instead of going through the registry (no id exists yet).
-                    promise.reject_promise(Some(&msg));
-                    // Reject and return the promise so the JS caller observes the failure.
-                    // The promise is not yet registered, so it must be returned directly.
-                    if let Some(ret) = retval {
-                        *ret = Some(promise);
-                    }
-                    return 1;
-                }
-            };
+                let id = register_promise(context.clone(), promise.clone());
+                msg_args.set_int(1, id);
 
-            // Commit
-            let id = register_promise(context.clone(), promise.clone());
-            msg_args.set_int(1, id);
+                frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
+            } else {
+                // CEF SHM: large payload, no ListValue
+                let id = register_promise(context.clone(), promise.clone());
 
-            // Store SHM only after id exists
-            if let Some(shm) = shm {
-                outgoing_shm().lock().unwrap().insert(id, shm);
+                with_array_buffer(ptr as *const u8, len, |data| {
+                    let payload_len = 2 + cmd_len + data.len();
+                    let mut payload = Vec::with_capacity(payload_len);
+                    payload.extend_from_slice(&(cmd_len as u16).to_le_bytes());
+                    payload.extend_from_slice(cmd_bytes);
+                    payload.extend_from_slice(data);
+
+                    let mut msg = cef_shm::create(
+                        "ipc",
+                        IpcMsgKind::BinaryInvoke as i32,
+                        id,
+                        &payload,
+                    ).expect("CEF SHM creation failed");
+
+                    frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
+                });
             }
-
-            frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
 
             if let Some(ret) = retval {
                 *ret = Some(promise);

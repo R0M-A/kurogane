@@ -6,7 +6,6 @@ use cef::*;
 use std::sync::Arc;
 use crate::ipc::protocol::{get_kind, IpcMsgKind};
 use crate::ipc::browser_state::{IpcDispatcher, IpcContext};
-use crate::ipc::renderer_state::outgoing_shm;
 use crate::ipc::{rpc, binary};
 use crate::debug;
 
@@ -40,7 +39,7 @@ pub fn route_browser(
             rpc::handle_invoke(frame, id, command, payload, dispatcher, ctx);
         }
 
-        // Binary invoke
+        // Binary invoke (inline only; SHM handled in pre-dispatch)
         IpcMsgKind::BinaryInvoke => {
             let command = list_get_string(args, 2);
 
@@ -56,52 +55,9 @@ pub fn route_browser(
                 return true;
             }
 
-            // Large payload via SHM; open before the renderer drops it
-            // Handle SHM buffer reading for large payloads
-            let result: Result<(), String> = (|| {
-                let name = list_get_string(args, 3);
-                let raw_size = list_get_int(args, 4);
-
-                if raw_size <= 0 {
-                    return Err(format!("invalid SHM size: {}", raw_size));
-                }
-
-                let size = raw_size as usize;
-
-                if size > crate::ipc::transport::shm::MAX_SHM_SIZE {
-                    return Err(format!(
-                        "SHM exceeds limit: {} > {}",
-                        size,
-                        crate::ipc::transport::shm::MAX_SHM_SIZE
-                    ));
-                }
-
-                let shm = crate::ipc::transport::shm::SharedBuffer::open(&name, size)?;
-
-                shm.with_read(|data| {
-                    debug!(
-                        "[IPC Browser] binary invoke (SHM): '{}' (id={}, {} bytes)",
-                        command, id, data.len()
-                    );
-
-                    binary::handle_invoke(frame, id, command, data, dispatcher, ctx);
-                })?;
-
-                Ok(())
-            })();
-
-            if let Err(e) = result {
-                debug!("[IPC Browser] SHM failure: {}", e);
-                binary::send_error(frame, id, e);
-            }
-
+            debug!("[IPC Router] inline BinaryInvoke missing binary arg");
+            binary::send_error(frame, id, "missing binary data".into());
             return true;
-        }
-
-        // SHM_FREE: renderer has finished reading a large binary response
-        IpcMsgKind::ShmFree => {
-            debug!("[IPC Browser] SHM_FREE for id={}", id);
-            binary::handle_shm_free(id);
         }
 
         _ => return false,
@@ -129,15 +85,11 @@ pub fn route_renderer(
 
     match kind {
         IpcMsgKind::Resolve => {
-            // Release outgoing SHM; browser has read it and responded
-            outgoing_shm().lock().unwrap().remove(&id);
             let payload = list_cef_string(args, 2);
             rpc::resolve_cef_string(id, true, &payload);
         }
 
         IpcMsgKind::Reject => {
-            // Release outgoing SHM; browser has read it and responded
-            outgoing_shm().lock().unwrap().remove(&id);
             let payload = list_cef_string(args, 2);
             rpc::resolve_cef_string(id, false, &payload);
         }

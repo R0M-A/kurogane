@@ -6,12 +6,16 @@
 use cef::*;
 use std::sync::Arc;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use crate::ipc::protocol::{IpcId, IpcMsgKind, set_kind};
-use crate::ipc::transport::shm::{SharedBuffer, SHM_THRESHOLD, SHM_HEADER_SIZE};
-use crate::ipc::renderer_state::{outgoing_shm, registry};
-use crate::ipc::browser_state::{response_shm_store, IpcContext};
+use crate::ipc::protocol::IpcMsgKind;
+use crate::ipc::transport::cef_shm;
+use crate::ipc::binary_buffer::SharedBinary;
+use crate::ipc::renderer_state::registry;
+use crate::ipc::browser_state::IpcContext;
 use crate::ipc::IpcDispatcher;
 use crate::debug;
+
+/// Inline/SHM threshold: payloads >= this size use CEF shared memory.
+pub const SHM_THRESHOLD: usize = 16 * 1024; // 16KB
 
 // BROWSER SIDE
 
@@ -31,10 +35,6 @@ pub fn handle_invoke(
     send_response(frame, id, result);
 }
 
-pub fn handle_shm_free(id: i32) {
-    response_shm_store().lock().unwrap().remove(&id);
-}
-
 pub fn send_error(frame: &Frame, id: i32, err: String) {
     if frame.is_valid() == 0 {
         return;
@@ -43,7 +43,7 @@ pub fn send_error(frame: &Frame, id: i32, err: String) {
     let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
     let mut args = msg.argument_list().unwrap();
 
-    set_kind(&mut args, IpcMsgKind::Reject);
+    crate::ipc::protocol::set_kind(&mut args, IpcMsgKind::Reject);
     args.set_int(1, id);
     args.set_string(2, Some(&CefString::from(err.as_str())));
 
@@ -64,135 +64,75 @@ pub fn send_response(
         return;
     }
 
-    let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
-    let mut args = msg.argument_list().unwrap();
-
     match result {
         Ok(data) => {
-            set_kind(&mut args, IpcMsgKind::BinaryResponse);
-            args.set_int(1, id);
-
             if data.len() < SHM_THRESHOLD {
                 debug!("[IPC Browser] inline binary response: {} bytes", data.len());
 
+                let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
+                let mut args = msg.argument_list().unwrap();
+                crate::ipc::protocol::set_kind(&mut args, IpcMsgKind::BinaryResponse);
+                args.set_int(1, id);
+
                 let mut binary = binary_value_create(Some(data.as_slice())).unwrap();
                 args.set_binary(2, Some(&mut binary));
+
+                frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
             } else {
                 debug!("[IPC Browser] SHM binary response: {} bytes", data.len());
 
-                let mut shm = match SharedBuffer::create(data.len()) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        debug!("[IPC Browser] SHM create failed: {}", e);
-                        return send_error(frame, id, e);
-                    }
+                let mut msg = match cef_shm::create(
+                    "ipc",
+                    IpcMsgKind::BinaryResponse as i32,
+                    id,
+                    &data,
+                ) {
+                    Some(m) => m,
+                    None => return send_error(frame, id, "CEF SHM creation failed".into()),
                 };
 
-                if let Err(e) = shm.write(&data) {
-                    debug!("[IPC Browser] SHM write failed: {}", e);
-                    return send_error(frame, id, e);
-                }
-
-                let name = shm.name();
-                args.set_string(2, Some(&CefString::from(name.as_str())));
-
-                // SHM payloads are validated against MAX_SHM_SIZE during creation/open
-                // and MAX_SHM_SIZE is guaranteed to fit within IpcId.
-                args.set_int(3, (data.len() + SHM_HEADER_SIZE) as IpcId);
-
-                // Keep SHM alive; renderer sends msg_type 5 (SHM_FREE) after reading
-                response_shm_store().lock().unwrap().insert(id, shm);
+                frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
             }
         }
 
         Err(err) => {
-            set_kind(&mut args, IpcMsgKind::Reject);
+            let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
+            let mut args = msg.argument_list().unwrap();
+            crate::ipc::protocol::set_kind(&mut args, IpcMsgKind::Reject);
             args.set_int(1, id);
             args.set_string(2, Some(&CefString::from(err.as_str())));
+            frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
         }
     }
-
-    frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
 }
 
 // RENDERER SIDE
 
-pub fn handle_response(
-    frame: &mut Frame,
-    id: i32,
-    args: &ListValue,
-) {
-    // Release outgoing SHM regardless of transport used in response
-    outgoing_shm().lock().unwrap().remove(&id);
-
+/// Handle inline binary response (small payload, sent via ListValue BinaryValue).
+pub fn handle_response(_frame: &mut Frame, id: i32, args: &ListValue) {
     if let Some(binary) = args.binary(2) {
-
         let size = binary.size();
         let mut buf = vec![0u8; size];
         let written = binary.data(Some(&mut buf), 0);
         buf.truncate(written);
 
         debug!("[IPC Renderer] inline binary response: {} bytes", written);
-
         resolve_binary(id, &buf);
-    } else {
-        // Browser used SHM for this response
-        let name: CefString = (&args.string(2)).into();
-        let raw_size = args.int(3);
-
-        if raw_size <= 0 {
-            let msg = CefString::from("invalid shm size");
-
-            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
-
-            send_shm_free(frame, id);
-            return;
-        }
-
-        let size = raw_size as usize;
-
-        if size > crate::ipc::transport::shm::MAX_SHM_SIZE {
-            let msg = CefString::from("shm size exceeds limit");
-
-            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
-
-            send_shm_free(frame, id);
-            return;
-        }
-
-        // Pass SHM slice directly; V8 performs the copy internally
-        // V8 copies the data during resolve; SHM must remain valid until then
-        let shm = match SharedBuffer::open(&name.to_string(), size) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[IPC] SHM open failed for id={}: {}", id, e);
-
-                let msg = CefString::from(format!("shm transport error: {}", e).as_str());
-                crate::ipc::rpc::resolve_cef_string(id, false, &msg);
-
-                send_shm_free(frame, id);
-                return;
-            }
-        };
-
-        let result = shm.with_read(|payload| {
-            resolve_binary(id, payload);
-        });
-
-        if let Err(e) = result {
-            eprintln!("[IPC] SHM read failed: {}", e);
-
-            let msg = CefString::from(format!("shm transport error: {}", e).as_str());
-
-            crate::ipc::rpc::resolve_cef_string(id, false, &msg);
-
-            send_shm_free(frame, id);
-            return;
-        }
-
-        // Notify browser it can release the SHM buffer
-        send_shm_free(frame, id);
     }
+}
+
+/// Handle SHM-backed binary response (large payload, zero-copy to V8).
+pub fn handle_response_shm(_frame: &mut Frame, region: &SharedMemoryRegion, id: i32) {
+    let buffer: SharedBinary = Arc::new(
+        crate::ipc::binary_buffer::ShmBinary::new(region.clone(), cef_shm::HEADER_SIZE)
+    );
+
+    debug!(
+        "[IPC Renderer] SHM binary response: {} bytes",
+        buffer.data().len()
+    );
+
+    resolve_binary_shm(id, buffer);
 }
 
 fn resolve_binary(id: i32, payload: &[u8]) {
@@ -214,14 +154,36 @@ fn resolve_binary(id: i32, payload: &[u8]) {
     }
 }
 
-/// Notify the browser that it can release its SHM response buffer.
-pub fn send_shm_free(frame: &mut Frame, id: i32) {
-    let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
-    let mut args = msg.argument_list().unwrap();
+wrap_v8_array_buffer_release_callback! {
+    struct BinaryBufRelease {
+        holder: SharedBinary,
+    }
+    impl V8ArrayBufferReleaseCallback {
+        fn release_buffer(&self, _buffer: *mut u8) {}
+    }
+}
 
-    set_kind(&mut args, IpcMsgKind::ShmFree);
-    args.set_int(1, id);
+fn resolve_binary_shm(id: i32, buffer: SharedBinary) {
+    let entry = registry().lock().unwrap().take(id);
 
-    frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
-    debug!("[IPC Renderer] SHM_FREE sent for id={}", id);
+    if let Some((context, promise)) = entry {
+        if context.enter() == 0 {
+            eprintln!("[IPC] Failed to enter V8 context for binary promise id={}", id);
+            return;
+        }
+
+        let ptr = buffer.data().as_ptr() as *mut u8;
+        let len = buffer.data().len();
+
+        let mut release = BinaryBufRelease::new(buffer);
+
+        let mut arr = v8_value_create_array_buffer(
+            ptr,
+            len,
+            Some(&mut release),
+        ).unwrap();
+
+        promise.resolve_promise(Some(&mut arr));
+        context.exit();
+    }
 }

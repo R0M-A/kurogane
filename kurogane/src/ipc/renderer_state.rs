@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use crate::ipc::protocol::IpcId;
-use crate::ipc::transport::shm::SharedBuffer;
 
 //
 // Promise registry: Tracks pending promises awaiting responses from the browser process
@@ -57,22 +56,10 @@ impl PromiseRegistry {
 
 static PROMISE_REGISTRY: OnceLock<Mutex<PromiseRegistry>> = OnceLock::new();
 
-//
-// SHM store for renderer->browser outgoing requests.
-// Keeps the SHM alive until the browser's response arrives,
-// proving the browser has already read the data.
-//
-
-static OUTGOING_SHM: OnceLock<Mutex<HashMap<IpcId, SharedBuffer>>> = OnceLock::new();
-
 // ACCESSORS
 
 pub fn registry() -> &'static Mutex<PromiseRegistry> {
     PROMISE_REGISTRY.get_or_init(Default::default)
-}
-
-pub fn outgoing_shm() -> &'static Mutex<HashMap<IpcId, SharedBuffer>> {
-    OUTGOING_SHM.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 // HELPERS

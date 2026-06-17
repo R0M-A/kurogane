@@ -4,10 +4,7 @@
 //! and the runtime state required for active IPC transactions.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
-use crate::ipc::protocol::IpcId;
-use crate::ipc::transport::shm::SharedBuffer;
 use crate::browser_registry::BrowserId;
 
 // Handler types
@@ -64,15 +61,4 @@ impl IpcDispatcher {
     pub fn dispatch_binary_with_context(&self, command: &str, payload: &[u8], _ctx: IpcContext) -> Result<Vec<u8>, String> {
         self.dispatch_binary(command, payload)
     }
-}
-
-/// Keep SHM alive until the renderer signals it has finished reading (msg_type 5)
-static RESPONSE_SHM_STORE: OnceLock<Mutex<HashMap<IpcId, SharedBuffer>>> = OnceLock::new();
-
-//
-// State accessors
-//
-
-pub fn response_shm_store() -> &'static Mutex<HashMap<IpcId, SharedBuffer>> {
-    RESPONSE_SHM_STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }

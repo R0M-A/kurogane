@@ -1,10 +1,11 @@
 pub mod protocol;
 pub mod transport {
-    pub mod shm;
+    pub mod cef_shm;
 }
 pub mod browser_state;
 pub mod renderer_state;
 pub mod rpc;
+pub mod binary_buffer;
 pub mod binary;
 pub mod router;
 pub mod browser;
