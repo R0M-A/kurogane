@@ -3,6 +3,7 @@
 //! Handles JSON-based request/response pattern with promise correlation.
 
 use cef::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use crate::ipc::protocol::{set_kind, IpcMsgKind, IpcId};
@@ -21,6 +22,30 @@ pub fn handle_invoke(
     ctx: IpcContext,
 ) {
     debug!("[RPC Browser] invoke '{}' id={}", command, id);
+
+    // Check for async handler first
+    if dispatcher.is_async(&command) {
+        let aborted = Arc::new(AtomicBool::new(false));
+        dispatcher.insert_pending(id, PendingEntry {
+            browser_id: ctx.browser_id,
+            aborted: aborted.clone(),
+        });
+        let responder = IpcResponder::new(Box::new({
+            let aborted = aborted.clone();
+            let frame = frame.clone();
+            let dispatcher = Arc::clone(dispatcher);
+            move |result| {
+                dispatcher.remove_pending(id);
+                if !aborted.load(Ordering::SeqCst) {
+                    send_response(&frame, id, result, 0);
+                } else {
+                    debug!("[IPC Browser] dropping JSON response for canceled id={}", id);
+                }
+            }
+        }));
+        dispatcher.dispatch_async(&command, &payload, responder);
+        return;
+    }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         dispatcher.dispatch_with_context(&command, &payload, ctx)

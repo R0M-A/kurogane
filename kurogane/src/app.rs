@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use cef::*;
 use crate::app::resolver::ResolvedFrontend;
-use crate::ipc::browser_state::{IpcDispatcher, IpcHandler, BinaryHandler};
+use crate::ipc::browser_state::{IpcDispatcher, IpcHandler, BinaryHandler, AsyncIpcHandler, AsyncBinaryHandler, IpcResponder, BinaryResponder};
 use crate::runtime::{RuntimeBootstrap, Runtime};
 use crate::error::RuntimeError;
 use crate::spec::{RuntimeSpec, RuntimeMode};
@@ -160,6 +160,8 @@ pub struct App {
     source: Source,
     commands: HashMap<String, IpcHandler>,
     binary_commands: HashMap<String, BinaryHandler>,
+    async_commands: HashMap<String, AsyncIpcHandler>,
+    async_binary_commands: HashMap<String, AsyncBinaryHandler>,
 
     profile_id: Option<String>,
     persist_session_cookies: bool,
@@ -186,6 +188,8 @@ impl App {
             source,
             commands: HashMap::new(),
             binary_commands: HashMap::new(),
+            async_commands: HashMap::new(),
+            async_binary_commands: HashMap::new(),
 
             profile_id: None,
             persist_session_cookies: true,
@@ -233,7 +237,11 @@ impl App {
     {
         let name = name.into();
 
-        if self.commands.contains_key(&name) || self.binary_commands.contains_key(&name) {
+        if self.commands.contains_key(&name)
+            || self.binary_commands.contains_key(&name)
+            || self.async_commands.contains_key(&name)
+            || self.async_binary_commands.contains_key(&name)
+        {
             panic!("command '{name}' registered twice");
         }
 
@@ -265,11 +273,63 @@ impl App {
     {
         let name = name.into();
 
-        if self.commands.contains_key(&name) || self.binary_commands.contains_key(&name) {
+        if self.commands.contains_key(&name)
+            || self.binary_commands.contains_key(&name)
+            || self.async_commands.contains_key(&name)
+            || self.async_binary_commands.contains_key(&name)
+        {
             panic!("command '{name}' registered twice");
         }
 
         self.binary_commands.insert(name, Box::new(handler));
+        self
+    }
+
+    /// Register an async JSON command handler.
+    ///
+    /// The handler receives the parsed JSON value and an IpcResponder.
+    /// It should start async work and call responder.resolve() when done.
+    ///
+    /// Panics if name has already been registered.
+    pub fn async_command<F>(mut self, name: impl Into<String>, handler: F) -> Self
+    where
+        F: Fn(Value, IpcResponder) + Send + Sync + 'static,
+    {
+        let name = name.into();
+
+        if self.commands.contains_key(&name)
+            || self.binary_commands.contains_key(&name)
+            || self.async_commands.contains_key(&name)
+            || self.async_binary_commands.contains_key(&name)
+        {
+            panic!("command '{name}' registered twice");
+        }
+
+        self.async_commands.insert(name, Box::new(handler));
+        self
+    }
+
+    /// Register an async binary command handler.
+    ///
+    /// The handler receives owned bytes and a BinaryResponder.
+    /// It should start async work and call responder.resolve() when done.
+    ///
+    /// Panics if name has already been registered.
+    pub fn async_binary_command<F>(mut self, name: impl Into<String>, handler: F) -> Self
+    where
+        F: Fn(Vec<u8>, BinaryResponder) + Send + Sync + 'static,
+    {
+        let name = name.into();
+
+        if self.commands.contains_key(&name)
+            || self.binary_commands.contains_key(&name)
+            || self.async_commands.contains_key(&name)
+            || self.async_binary_commands.contains_key(&name)
+        {
+            panic!("command '{name}' registered twice");
+        }
+
+        self.async_binary_commands.insert(name, Box::new(handler));
         self
     }
 
@@ -314,6 +374,8 @@ impl App {
             source,
             commands,
             binary_commands,
+            async_commands,
+            async_binary_commands,
             profile_id,
             persist_session_cookies,
             gpu_mode,
@@ -324,7 +386,7 @@ impl App {
         } = self;
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
-        let dispatcher = Arc::new(IpcDispatcher::new(commands, binary_commands));
+        let dispatcher = Arc::new(IpcDispatcher::with_async(commands, binary_commands, async_commands, async_binary_commands));
 
         let spec = RuntimeSpec {
             mode: RuntimeMode::Embedded,
@@ -350,6 +412,8 @@ impl App {
             source,
             commands,
             binary_commands,
+            async_commands,
+            async_binary_commands,
             profile_id,
             persist_session_cookies,
             gpu_mode,
@@ -361,7 +425,7 @@ impl App {
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
         // Freeze IPC configuration into an immutable dispatcher shared across the runtime object graph
-        let dispatcher = Arc::new(IpcDispatcher::new(commands, binary_commands));
+        let dispatcher = Arc::new(IpcDispatcher::with_async(commands, binary_commands, async_commands, async_binary_commands));
 
         let spec = RuntimeSpec {
             mode: RuntimeMode::Views,
@@ -387,6 +451,8 @@ impl App {
             source,
             commands,
             binary_commands,
+            async_commands,
+            async_binary_commands,
             profile_id,
             persist_session_cookies,
             gpu_mode,
@@ -398,7 +464,7 @@ impl App {
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
         // Freeze IPC configuration into an immutable dispatcher shared across the runtime object graph
-        let dispatcher = Arc::new(IpcDispatcher::new(commands, binary_commands));
+        let dispatcher = Arc::new(IpcDispatcher::with_async(commands, binary_commands, async_commands, async_binary_commands));
 
         let spec = RuntimeSpec {
             mode: RuntimeMode::Views,
