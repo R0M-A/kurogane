@@ -4,6 +4,7 @@ use cef::{ImplSharedMemoryRegion, SharedMemoryRegion};
 
 pub trait BinaryBuffer: Send + Sync {
     fn data(&self) -> &[u8];
+    fn data_mut(&mut self) -> &mut [u8];
 }
 
 pub struct ShmBinary {
@@ -25,6 +26,16 @@ impl BinaryBuffer for ShmBinary {
         unsafe {
             let ptr = self.region.memory() as *const u8;
             std::slice::from_raw_parts(ptr.add(self.offset), self.region.size() - self.offset)
+        }
+    }
+
+    fn data_mut(&mut self) -> &mut [u8] {
+        if self.region.is_valid() == 0 || self.offset >= self.region.size() {
+            return &mut [];
+        }
+        unsafe {
+            let ptr = self.region.memory() as *mut u8;
+            std::slice::from_raw_parts_mut(ptr.add(self.offset), self.region.size() - self.offset)
         }
     }
 }
