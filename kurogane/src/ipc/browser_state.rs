@@ -4,11 +4,13 @@
 //! and the runtime state required for active IPC transactions.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::browser_registry::BrowserId;
+use crate::browser_info_map::{BrowserInfoMap, BrowserInfoMapVisitor, BrowserInfoMapVisitorResult};
 use crate::debug;
 
 // Handler types
@@ -65,8 +67,8 @@ pub type AsyncIpcHandler = Box<dyn Fn(serde_json::Value, IpcResponder, IpcContex
 pub type AsyncBinaryHandler = Box<dyn Fn(Vec<u8>, BinaryResponder, IpcContext) + Send + Sync>;
 
 /// A pending async handler entry that can be cancelled.
+#[derive(Clone)]
 pub struct PendingEntry {
-    pub browser_id: Option<BrowserId>,
     pub aborted: Arc<AtomicBool>,
 }
 
@@ -78,7 +80,7 @@ pub struct IpcDispatcher {
     binary_handlers: HashMap<String, BinaryHandler>,
     async_handlers: HashMap<String, AsyncIpcHandler>,
     async_binary_handlers: HashMap<String, AsyncBinaryHandler>,
-    pending: Mutex<HashMap<i32, PendingEntry>>,
+    pending: Mutex<BrowserInfoMap<i32, PendingEntry>>,
 }
 
 /// Contextual information for an IPC dispatch call.
@@ -86,6 +88,24 @@ pub struct IpcDispatcher {
 pub struct IpcContext {
     pub browser_id: Option<BrowserId>,
     pub frame_id: Option<i64>,
+}
+
+struct CancelAllVisitor {
+    count: AtomicUsize,
+}
+
+impl BrowserInfoMapVisitor<i32, PendingEntry> for CancelAllVisitor {
+    fn on_next_info(
+        &self,
+        _browser_id: BrowserId,
+        _key: i32,
+        value: &PendingEntry,
+    ) -> ControlFlow<BrowserInfoMapVisitorResult, BrowserInfoMapVisitorResult> {
+        value.aborted.store(true, Ordering::SeqCst);
+        self.count.fetch_add(1, Ordering::Relaxed);
+
+        ControlFlow::Continue(BrowserInfoMapVisitorResult::RemoveEntry)
+    }
 }
 
 impl IpcDispatcher {
@@ -98,7 +118,7 @@ impl IpcDispatcher {
             binary_handlers,
             async_handlers: HashMap::new(),
             async_binary_handlers: HashMap::new(),
-            pending: Mutex::new(HashMap::new()),
+            pending: Mutex::new(BrowserInfoMap::default()),
         }
     }
 
@@ -113,7 +133,7 @@ impl IpcDispatcher {
             binary_handlers,
             async_handlers,
             async_binary_handlers,
-            pending: Mutex::new(HashMap::new()),
+            pending: Mutex::new(BrowserInfoMap::default()),
         }
     }
 
@@ -176,39 +196,37 @@ impl IpcDispatcher {
 
     // Pending handler registry
 
-    pub fn insert_pending(&self, id: i32, entry: PendingEntry) {
-        self.pending.lock().unwrap().insert(id, entry);
-    }
-
-    pub fn remove_pending(&self, id: i32) {
-        self.pending.lock().unwrap().remove(&id);
-    }
-
-    /// Cancel a pending handler by id. Returns true if found.
-    pub fn cancel_pending(&self, id: i32) -> bool {
-        if let Some(entry) = self.pending.lock().unwrap().remove(&id) {
-            entry.aborted.store(true, Ordering::SeqCst);
-            debug!("[IPC Browser] canceled pending id={}", id);
-            true
-        } else {
-            false
+    pub fn insert_pending(&self, browser_id: Option<BrowserId>, id: i32, entry: PendingEntry) {
+        if let Some(bid) = browser_id {
+            self.pending.lock().unwrap().insert(bid, id, entry);
         }
+    }
+
+    pub fn remove_pending(&self, browser_id: Option<BrowserId>, id: i32) {
+        if let Some(bid) = browser_id {
+            self.pending.lock().unwrap().remove(bid, id);
+        }
+    }
+
+    /// Cancel a pending handler by browser and id. Returns true if found.
+    pub fn cancel_pending(&self, browser_id: Option<BrowserId>, id: i32) -> bool {
+        if let Some(bid) = browser_id {
+            if let Some(entry) = self.pending.lock().unwrap().remove(bid, id) {
+                entry.aborted.store(true, Ordering::SeqCst);
+                debug!("[IPC Browser] canceled pending id={}", id);
+                return true;
+            }
+        }
+        false
     }
 
     /// Cancel all pending handlers for a given browser.
     pub fn cancel_all_for_browser(&self, browser_id: BrowserId) -> usize {
-        let mut pending = self.pending.lock().unwrap();
-        let to_cancel: Vec<i32> = pending
-            .iter()
-            .filter(|(_, e)| e.browser_id == Some(browser_id))
-            .map(|(id, _)| *id)
-            .collect();
-        let count = to_cancel.len();
-        for id in &to_cancel {
-            if let Some(entry) = pending.remove(id) {
-                entry.aborted.store(true, Ordering::SeqCst);
-            }
-        }
+        let visitor = CancelAllVisitor {
+            count: AtomicUsize::new(0),
+        };
+        self.pending.lock().unwrap().find_browser_all(browser_id, &visitor);
+        let count = visitor.count.load(Ordering::Relaxed);
         if count > 0 {
             debug!("[IPC Browser] canceled {} pending handlers for browser", count);
         }
