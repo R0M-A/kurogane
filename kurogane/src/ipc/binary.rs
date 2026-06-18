@@ -31,8 +31,8 @@ pub fn handle_invoke(
     // Check for async binary handler first
     if dispatcher.is_async_binary(&command) {
         let aborted = Arc::new(AtomicBool::new(false));
-        dispatcher.insert_pending(id, PendingEntry {
-            browser_id: ctx.browser_id,
+        let browser_id = ctx.browser_id;
+        dispatcher.insert_pending(browser_id, id, PendingEntry {
             aborted: aborted.clone(),
         });
         let responder = BinaryResponder::new(Box::new({
@@ -40,7 +40,7 @@ pub fn handle_invoke(
             let frame = frame.clone();
             let dispatcher = Arc::clone(dispatcher);
             move |result, error_code| {
-                dispatcher.remove_pending(id);
+                dispatcher.remove_pending(browser_id, id);
                 if !aborted.load(Ordering::SeqCst) {
                     send_response(&frame, id, result, error_code);
                 } else {
@@ -48,12 +48,12 @@ pub fn handle_invoke(
                 }
             }
         }));
-        dispatcher.dispatch_async_binary(&command, data, responder);
+        dispatcher.dispatch_async_binary(&command, data, responder, ctx);
         return;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        dispatcher.dispatch_binary_with_context(&command, data, ctx)
+        dispatcher.dispatch_binary(&command, data, ctx)
     }));
 
     let (response, error_code) = match result {

@@ -63,7 +63,7 @@ pub fn route_browser(
         // Cancel request (renderer to browser)
         IpcMsgKind::CancelRequest => {
             debug!("[IPC Browser] CancelRequest id={}", id);
-            dispatcher.cancel_pending(id);
+            dispatcher.cancel_pending(ctx.browser_id, id);
             return true;
         }
 

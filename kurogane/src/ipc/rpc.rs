@@ -26,8 +26,8 @@ pub fn handle_invoke(
     // Check for async handler first
     if dispatcher.is_async(&command) {
         let aborted = Arc::new(AtomicBool::new(false));
-        dispatcher.insert_pending(id, PendingEntry {
-            browser_id: ctx.browser_id,
+        let browser_id = ctx.browser_id;
+        dispatcher.insert_pending(browser_id, id, PendingEntry {
             aborted: aborted.clone(),
         });
         let responder = IpcResponder::new(Box::new({
@@ -35,7 +35,7 @@ pub fn handle_invoke(
             let frame = frame.clone();
             let dispatcher = Arc::clone(dispatcher);
             move |result| {
-                dispatcher.remove_pending(id);
+                dispatcher.remove_pending(browser_id, id);
                 if !aborted.load(Ordering::SeqCst) {
                     send_response(&frame, id, result, 0);
                 } else {
@@ -43,12 +43,12 @@ pub fn handle_invoke(
                 }
             }
         }));
-        dispatcher.dispatch_async(&command, &payload, responder);
+        dispatcher.dispatch_async(&command, &payload, responder, ctx);
         return;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        dispatcher.dispatch_with_context(&command, &payload, ctx)
+        dispatcher.dispatch(&command, &payload, ctx)
     }));
 
     let (response, error_code) = match result {
