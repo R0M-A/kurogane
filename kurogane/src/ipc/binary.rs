@@ -154,36 +154,9 @@ fn resolve_binary(id: i32, payload: &[u8]) {
     }
 }
 
-wrap_v8_array_buffer_release_callback! {
-    struct BinaryBufRelease {
-        holder: SharedBinary,
-    }
-    impl V8ArrayBufferReleaseCallback {
-        fn release_buffer(&self, _buffer: *mut u8) {}
-    }
-}
-
 fn resolve_binary_shm(id: i32, buffer: SharedBinary) {
-    let entry = registry().lock().unwrap().take(id);
-
-    if let Some((context, promise)) = entry {
-        if context.enter() == 0 {
-            eprintln!("[IPC] Failed to enter V8 context for binary promise id={}", id);
-            return;
-        }
-
-        let ptr = buffer.data().as_ptr() as *mut u8;
-        let len = buffer.data().len();
-
-        let mut release = BinaryBufRelease::new(buffer);
-
-        let mut arr = v8_value_create_array_buffer(
-            ptr,
-            len,
-            Some(&mut release),
-        ).unwrap();
-
-        promise.resolve_promise(Some(&mut arr));
-        context.exit();
-    }
+    // External-memory ArrayBuffers are unavailable under V8 sandboxing.
+    // Copy SHM responses into a V8-owned ArrayBuffer instead.
+    // TODO: Investigate a sandbox-compatible zero-copy path.
+    resolve_binary(id, buffer.data());
 }
