@@ -135,6 +135,24 @@ pub fn handle_response_shm(_frame: &mut Frame, region: &SharedMemoryRegion, id: 
     resolve_binary_shm(id, buffer);
 }
 
+fn create_array_buffer_from_bytes(payload: &[u8]) -> Option<V8Value> {
+    let mut store = v8_backing_store_create(payload.len())?;
+
+    if store.is_valid() == 0 {
+        return None;
+    }
+
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            payload.as_ptr(),
+            store.data() as *mut u8,
+            payload.len(),
+        );
+    }
+
+    v8_value_create_array_buffer_from_backing_store(Some(&mut store))
+}
+
 fn resolve_binary(id: i32, payload: &[u8]) {
     let entry = registry().lock().unwrap().take(id);
 
@@ -144,19 +162,39 @@ fn resolve_binary(id: i32, payload: &[u8]) {
             return;
         }
 
-        let mut buf = v8_value_create_array_buffer_with_copy(
-            payload.as_ptr() as *mut u8,
-            payload.len(),
-        ).unwrap();
+        match create_array_buffer_from_bytes(payload) {
+            Some(mut buf) => {
+                promise.resolve_promise(Some(&mut buf));
+            }
 
-        promise.resolve_promise(Some(&mut buf));
+            None => {
+                promise.reject_promise(Some(&CefString::from("Failed to create ArrayBuffer backing store")));
+            }
+        }
+
         context.exit(); // safe; lock not held
     }
 }
 
 fn resolve_binary_shm(id: i32, buffer: SharedBinary) {
-    // External-memory ArrayBuffers are unavailable under V8 sandboxing.
-    // Copy SHM responses into a V8-owned ArrayBuffer instead.
-    // TODO: Investigate a sandbox-compatible zero-copy path.
-    resolve_binary(id, buffer.data());
+    let entry = registry().lock().unwrap().take(id);
+
+    if let Some((context, promise)) = entry {
+        if context.enter() == 0 {
+            eprintln!("[IPC] Failed to enter V8 context for binary promise id={}", id);
+            return;
+        }
+
+        match create_array_buffer_from_bytes(buffer.data()) {
+            Some(mut arr) => {
+                promise.resolve_promise(Some(&mut arr));
+            }
+
+            None => {
+                promise.reject_promise(Some(&CefString::from("Failed to create SHM-backed ArrayBuffer")));
+            }
+        }
+
+        context.exit();
+    }
 }
