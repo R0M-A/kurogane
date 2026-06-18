@@ -88,7 +88,17 @@ pub fn send_response(
                     &data,
                 ) {
                     Some(m) => m,
-                    None => return send_error(frame, id, "CEF SHM creation failed".into()),
+                    None => {
+                        debug!("[IPC Browser] SHM creation failed for id={}, falling back to inline ({} bytes)", id, data.len());
+                        let mut msg = process_message_create(Some(&CefString::from("ipc"))).unwrap();
+                        let mut args = msg.argument_list().unwrap();
+                        crate::ipc::protocol::set_kind(&mut args, IpcMsgKind::BinaryResponse);
+                        args.set_int(1, id);
+                        let mut binary = binary_value_create(Some(data.as_slice())).unwrap();
+                        args.set_binary(2, Some(&mut binary));
+                        frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
+                        return;
+                    }
                 };
 
                 frame.send_process_message(ProcessId::RENDERER, Some(&mut msg));
