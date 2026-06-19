@@ -1,14 +1,12 @@
 # Kurogane: A composable Chromium runtime for Rust
 
-Build desktop applications on Chromium, or embed it directly into existing applications.
+Build high-performance, GPU-accelerated desktop applications on Chromium, or embed it directly into existing applications.
 
-Kurogane is a Rust-native runtime built on the [Chromium Embedded Framework (CEF)](https://en.wikipedia.org/wiki/Chromium_Embedded_Framework) for building high-performance, GPU-accelerated desktop applications.
-
-It provides direct access to Chromium's rendering engine while allowing the host application to retain control over its event loop, windowing and lifecycle.
+Kurogane is a Rust-native runtime built on [CEF](https://en.wikipedia.org/wiki/Chromium_Embedded_Framework), exposing Chromium's rendering engine while leaving windowing, event loops and lifecycle management to the host application.
 
 <p align="center">
   <img alt="Kurogane demo" src="docs/media/output.gif" width="400"><br>
-  <b>Native Rust. No WebView. No Electron.</b>
+  <b>Chromium, on your terms.</b>
 </p>
 
 ## Getting started
@@ -71,9 +69,11 @@ kurogane bundle
 
 Outputs a distributable app in the `dist/` directory.
 
+> **Note:** The bundling workflow is still under active development and should be considered experimental.
+
 ## Motivation
 
-This started as a GPU-accelerated visualization tool built on **Tauri** that performed extremely well on **Windows (WebView2)** out-of-the-box but encountered hard limitations on **Linux**:
+This started as a GPU-accelerated visualization tool built on **Tauri** that performed well on **Windows (WebView2)** out-of-the-box but encountered hard limitations on **Linux**:
 
 System WebViews vary across platforms: WebKitGTK on Linux, WebView2 on Windows and WKWebView on macOS. This variation affects rendering behavior, GPU paths and performance characteristics that are not directly controllable from the application layer.
 
@@ -81,13 +81,13 @@ Those constraints are inherent to _system WebViews_.
 
 Switching to [Chromium Embedded Framework (CEF)](https://github.com/chromiumembedded/cef) removes platform-level rendering variability but introduces a new set of tradeoffs around integration, lifecycle management and process coordination.
 
-The alternatives weren't satisfying either. **Electron** bundles a Node.js runtime and a fixed application model, introducing constraints around process structure, IPC design and baseline runtime size. Building directly on Chromium or CEF provides maximum control, but is complex, fragile and expensive to maintain without a solid abstraction layer.
+The alternatives weren't satisfying either. **Electron** provides a complete application platform built around Chromium and Node.js, but that convenience comes with a predefined runtime and application model. Building directly on Chromium or CEF provides maximum control, but is complex, fragile and expensive to maintain without a solid abstraction layer.
 
 Kurogane exists as that layer, built for Rust.
 
 ## What Kurogane is built for
 
-**Applications with existing architecture:** Supports embedding into host-managed environments with an existing event loop, window hierarchy, or GUI framework. Kurogane integrates Chromium as a component within the application, while the host retains control over execution flow and window ownership.
+* **Applications with existing architecture:** Supports embedding into host-managed environments with an existing event loop, window hierarchy, or GUI framework. Kurogane integrates Chromium as a component within the application, while the host retains control over execution flow and window ownership.
 * **High-frequency rendering workloads:** WebGL, Canvas, WASM-heavy visualization, anything where rendering behavior across platforms matters and where you cannot accept the variance that system WebViews introduce
 * **Developers who want Chromium-based rendering without Electron:** No embedded Node.js runtime. No imposed process model. Direct access to CEF's lifecycle hooks.
 * **Building custom desktop shells, engines or non-standard desktop applications:** Applications that need direct control over browser process lifecycle, renderer-side extension points, or fine-grained IPC between Rust and JavaScript.
@@ -100,7 +100,7 @@ When you should *not* use this project:
 * You want Node.js APIs: use [Electron](https://www.electronjs.org)
 * You're building a standard CRUD UI: _use either Tauri or Electron_
 
-This project is not intended as a replacement for Tauri or Electron. It optimizes for control over convenience and breadth.
+This project is not intended as a replacement for Tauri or Electron. Kurogane optimizes for control over convenience and breadth.
 
 ## Architecture overview
 
@@ -108,7 +108,7 @@ Kurogane's runtime model is organized around a small set of clear ownership boun
 
 ### Runtime and event loop
 
-The runtime can be initialized without entering Chromium's internal blocking message loop. Applications provide their own event loop and drive Chromium's message pump explicitly. This is the foundation for embedding Kurogane into existing GUI frameworks: `winit`, raw OS window handles, or anything else that manages its own run loop.
+The runtime can be initialized without entering Chromium's internal blocking message loop. Applications provide their own event loop and drive Chromium's message pump explicitly. This is the foundation for embedding Kurogane into existing GUI frameworks: [`winit`](docs/winit.md), raw OS window handles, or anything else that manages its own run loop.
 
 ### Runtime configuration
 
@@ -120,7 +120,7 @@ Browsers and windows are independently tracked entities with separate lifetimes.
 
 ### Browser lifecycle
 
-Browser creation returns a browser handle. Close routing follows CEF's expected browser shutdown protocol, including closing-state tracking, reentrancy protection and deterministic destruction sequencing. `on_before_close` fires reliably and shutdown signals propagate in a controlled and predictable order.
+Browser creation returns a browser handle. Close routing follows CEF's expected browser shutdown protocol, including closing-state tracking, reentrancy protection and deterministic destruction sequencing. [`on_before_close`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefLifeSpanHandler.html#OnBeforeClose) fires reliably and shutdown signals propagate in a controlled and predictable order.
 
 ### Request/response IPC (RPC-style)
 

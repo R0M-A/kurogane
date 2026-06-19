@@ -8,12 +8,12 @@ Kurogane supports multiple event-loop integration strategies when embedding Chro
 
 | Example | [`ControlFlow`](https://docs.rs/winit/latest/winit/event_loop/enum.ControlFlow.html) mode | Pump cadence | Idle CPU | Complexity | When to use |
 |---|---|---|---|---|---|
-| [`views_poll.rs`](views_poll.rs) | `Poll` | Every loop iteration | Highest | Trivial | Quick debugging / experimentation |
-| [`views_timer.rs`](views_timer.rs) | `WaitUntil` | Fixed 16 ms interval | Moderate | Low | Simple integrations without proxies |
-| [`views_scheduler.rs`](views_scheduler.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Medium | Standard production apps (Chromium Windows) |
-| [`host_window.rs`](host_window.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Advanced | Custom windowing / embedding into existing UI |
+| [`views_poll.rs`](../tests/winit/views_poll.rs) | `Poll` | Every loop iteration | Highest | Trivial | Quick debugging / experimentation |
+| [`views_timer.rs`](../tests/winit/views_timer.rs) | `WaitUntil` | Fixed 16 ms interval | Moderate | Low | Simple integrations without proxies |
+| [`views_scheduler.rs`](../tests/winit/views_scheduler.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Medium | Standard production apps (Chromium Windows) |
+| [`host_window.rs`](../tests/winit/host_window.rs) | `Wait` + wakeup | On Chromium's scheduler callback | Lowest | Advanced | Custom windowing / embedding into existing UI |
 
-> **Views vs. Embedded.** The first three examples use [Chromium's Views framework](https://github.com/chromiumembedded/cef/tree/master/include/views), where [`CefBrowserView`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefBrowserView.html) owns the native window. Host-managed native window embedding example ([`host_window.rs`](host_window.rs)) inverts this: the host creates the native window via [`winit`](https://docs.rs/winit/latest/winit/) and attaches Chromium as a child-window browser via [`CefWindowInfo::SetAsChild`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefWindowInfo.html). The event loop and window lifecycle management differs significantly between these two modes; see the native embedded integrator for details.
+> **Views vs. Embedded.** The first three examples use [Chromium's Views framework](https://github.com/chromiumembedded/cef/tree/master/include/views), where [`CefBrowserView`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefBrowserView.html) owns the native window. Host-managed native window embedding example ([`host_window.rs`](../tests/winit/host_window.rs)) inverts this: the host creates the native window via [`winit`](https://docs.rs/winit/latest/winit/) and attaches Chromium as a child-window browser via [`CefWindowInfo::SetAsChild`](https://magpcss.org/ceforum/apidocs3/projects/(default)/CefWindowInfo.html). The event loop and window lifecycle management differs significantly between these two modes; see the native embedded integrator for details.
 
 ## Continuous polling loop _(aka the Brute-forcer)_
 

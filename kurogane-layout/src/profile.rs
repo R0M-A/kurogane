@@ -89,7 +89,6 @@ pub fn sanitize_name(name: &str) -> String {
     sanitized
 }
 
-
 #[cfg(test)]
 mod property_tests {
     use super::*;
@@ -130,15 +129,9 @@ mod property_tests {
 
     #[test]
     fn profile_dir_isolated_per_executable() {
-        let a = profile_dir(
-            "my-app",
-            Path::new("/apps/a.exe"),
-        );
+        let a = profile_dir("my-app", Path::new("/apps/a.exe"));
 
-        let b = profile_dir(
-            "my-app",
-            Path::new("/apps/b.exe"),
-        );
+        let b = profile_dir("my-app", Path::new("/apps/b.exe"));
 
         assert_ne!(a, b);
     }

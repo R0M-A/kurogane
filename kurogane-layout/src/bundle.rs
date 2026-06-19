@@ -130,7 +130,7 @@ impl BundleLayout {
         let extra_ld = std::env::var("KUROGANE_LD_LIBRARY_PATH").unwrap_or_default();
 
         let script = format!(
-r#"#!/usr/bin/env sh
+            r#"#!/usr/bin/env sh
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"

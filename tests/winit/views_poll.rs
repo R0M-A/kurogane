@@ -19,10 +19,7 @@ struct ViewsDriver {
 }
 
 impl ApplicationHandler for ViewsDriver {
-    fn resumed(
-        &mut self,
-        _: &ActiveEventLoop,
-    ) {}
+    fn resumed(&mut self, _: &ActiveEventLoop) {}
 
     fn window_event(
         &mut self,

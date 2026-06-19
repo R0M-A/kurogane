@@ -30,13 +30,15 @@ impl kurogane::ClientAppRendererDelegate for RendererDelegate {
 
         if let Some(frame) = frame {
             frame.execute_java_script(
-                Some(&CefString::from(r#"
+                Some(&CefString::from(
+                    r#"
                     setTimeout(() => {
                         window.core.invoke("ping", { from: "renderer delegate" })
                             .then(result => console.log("[demo] ping result:", result))
                             .catch(err => console.error("[demo] ping failed:", err));
                     }, 1000);
-                "#)),
+                "#,
+                )),
                 None,
                 0,
             );

@@ -43,9 +43,7 @@ impl ApplicationHandler for ViewsDriver {
 
 fn main() {
     // Enable user events so Chromium's scheduler callback can wake the event loop
-    let event_loop = EventLoop::<()>::with_user_event()
-        .build()
-        .unwrap();
+    let event_loop = EventLoop::<()>::with_user_event().build().unwrap();
 
     let proxy = event_loop.create_proxy();
 

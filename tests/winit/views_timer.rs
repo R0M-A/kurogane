@@ -73,11 +73,9 @@ fn main() {
         .expect("Kurogane failed to initialize");
 
     let event_loop = EventLoop::new().expect("failed to create event loop");
-    
+
     // Initialize the fixed-interval pumping schedule
-    event_loop.set_control_flow(ControlFlow::WaitUntil(
-        Instant::now() + PUMP_INTERVAL,
-    ));
+    event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + PUMP_INTERVAL));
 
     let mut driver = ViewsDriver::new(handle);
     event_loop.run_app(&mut driver).expect("event loop failed");

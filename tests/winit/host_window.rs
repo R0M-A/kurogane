@@ -34,10 +34,7 @@ impl ApplicationHandler for EmbeddedDriver {
         }
 
         let window = event_loop
-            .create_window(
-                Window::default_attributes()
-                    .with_title("Kurogane Embedded"),
-            )
+            .create_window(Window::default_attributes().with_title("Kurogane Embedded"))
             .unwrap();
 
         let size = window.inner_size();
