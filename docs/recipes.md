@@ -2,99 +2,61 @@
 
 This document covers common workflows and advanced usage patterns when building applications with Kurogane.
 
-## Using a development server
+## Choosing a frontend source
 
-Kurogane can load a remote development server instead of bundled frontend files.
+### Development server
 
-This is useful when working with frameworks like Vite, React, or Vue that provide hot reload.
-
-### Example
+Use a local development server during development.
 
 ```rust
 use kurogane::App;
 
 fn main() {
-    App::url("http://localhost:5173")
-        .run_or_exit();
+    App::url("http://localhost:5173").run_or_exit();
 }
 ```
 
-The runtime will open the specified URL instead of loading local assets.
+Works with Vite, React, Vue, Svelte and any HTTP server.
 
-You can also use the following template for this:
+Generate a starter project:
 
 ```bash
-kurogane init --template server
+kurogane init --template spa
 ```
 
-* Works with any HTTP server
-* Ideal for development workflows
+### Production assets
 
-> **Note:** In production, you should bundle your frontend instead
-
-## Loading frontend from disk
-
-You can load the frontend directly from a local directory.
-
-### Example
+Load a bundled frontend directly from disk.
 
 ```rust
 use kurogane::App;
 
 fn main() {
-    App::new("/absolute/path/to/frontend")
-        .run_or_exit();
+    App::new("dist").run_or_exit();
 }
 ```
 
-The runtime will load `index.html` from the specified directory.
+Assets are served through the `app://app/` protocol.
 
-## Optional: runtime switching
-
-If you want to switch without rebuilding yopur project, you can handle it in your application entrypoint:
+### Switching between development and production
 
 ```rust
 use kurogane::App;
 
 fn main() {
-    let app = if std::env::var("DEV").is_ok() {
+    let app = if cfg!(debug_assertions) { // or anything
         App::url("http://localhost:5173")
     } else {
-        App::new("/absolute/path/to/frontend")
+        App::new("dist")
     };
 
     app.run_or_exit();
 }
 ```
 
-### Use cases
+## Loading WebAssembly modules
 
-* Testing static builds
-* Integrating external frontend pipelines
-* Debugging asset resolution issues
-
-## Switching between development and production
-
-Typically, you'll switch between:
-
-* a **dev server** during development
-* a **built frontend directory** in production
-
-### Development
-
-```rust
-App::url("http://localhost:5173")
-```
-
-### Production
-
-```rust
-App::new("dist")
-```
-
-## WebAssembly (WASM) integration
-
-Kurogane supports loading raw `.wasm` modules directly in the renderer.
+Kurogane can serve raw WebAssembly modules through the application protocol.
 
 This allows you to move performance-critical logic into WebAssembly without requiring additional tooling.
 
@@ -103,9 +65,8 @@ This allows you to move performance-critical logic into WebAssembly without requ
 * Load `.wasm` via the `app://app/` scheme
 * Direct JS <-> WASM interop
 * No dependency on `wasm-bindgen` or any Rust tooling baked into the runtime
-* Works with Canvas/WebGL pipelines
 
-### Building a WASM module
+### Build a module
 
 ```bash
 rustc \
@@ -122,13 +83,12 @@ rustc \
 rustup target add wasm32-unknown-unknown
 ```
 
-### Usage
-
 Place the compiled `.wasm` alongside your frontend:
 
 ```text
-index.html
-demo.wasm
+dist/
+├── index.html
+└── demo.wasm
 ```
 
 Then load it using `fetch()` or `WebAssembly.instantiate`.
@@ -139,44 +99,279 @@ Then load it using `fetch()` or `WebAssembly.instantiate`.
 * Source files are not needed in production
 * You are free to use higher-level tooling if desired
 
-## Custom protocol (`app://app/`)
+## Creating additional windows
 
-Kurogane serves application assets through a custom scheme:
+Additional browser windows can be created after startup.
 
-```text
-app://app/
+```rust
+runtime
+    .create_window(kurogane::WindowOptions {
+        url: "https://github.com".into(),
+        bounds: kurogane::BrowserBounds {
+            x: 100,
+            y: 100,
+            width: 800,
+            height: 600,
+        },
+        show_state: kurogane::WindowState::Normal,
+    })
+    .expect("failed to create window");
 ```
 
-This replaces traditional `file://` loading and provides better control over resource handling.
+### Multiple windows
 
-### Why this matters
+```rust
+let runtime = kurogane::App::url("https://xkcd.com")
+    .start()
+    .expect("Kurogane failed to initialize");
 
-The custom protocol enables:
-
-* Consistent same-origin behavior
-* Controlled asset loading
-* Compatibility with modern frontend tooling
-* Avoidance of `file://` security restrictions
-
-### Example
-
-```text
-app://app/index.html
-app://app/assets/logo.svg
-app://app/script.js
+runtime.create_window(/* ... */)?;
+runtime.create_window(/* ... */)?;
 ```
 
-All assets are resolved relative to the application root.
+Each browser runs as a native top-level window.
 
-### Behavior
+See:
 
-* Treated as a secure origin by Chromium
-* Supports ES modules, CSS imports and static assets
-* Works with bundlers like Vite and Webpack
+* [examples/multi_window.rs](../tests/multi-window.rs)
 
-## Summary
+## Exposing Rust commands to JavaScript
 
-* Use **dev servers** for fast iteration
-* Use **local assets** for production builds
-* Use **WASM** for performance-critical logic
-* Use **custom protocol** for reliable asset handling
+Register commands using `App::command`.
+
+```rust
+use serde_json::json;
+
+let runtime = App::url("https://example.com")
+    .command("ping", |payload| {
+        Ok(json!({"ok": true, "echo": payload}))
+    })
+    .start()?;
+```
+
+Invoke them from JavaScript:
+
+```javascript
+const result = await window.core.invoke("ping", { message: "hello" });
+```
+
+Commands exchange JSON values between JavaScript and Rust.
+
+See:
+
+* [examples/ipc.rs](../tests/ipc.rs)
+
+## Adding Chromium flags
+
+Pass Chromium command-line flags during startup.
+
+```rust
+use kurogane::App;
+
+fn main() {
+    App::new("frontend")
+        .chromium_flag("disable-popup-blocking")
+        .run_or_exit();
+}
+```
+
+Flags with values:
+
+```rust
+use kurogane::App;
+
+fn main() {
+    App::new("frontend")
+        .chromium_flag_with_value("enable-blink-features", "CanvasDrawElement")
+        .run_or_exit();
+}
+```
+
+Useful for enabling Chromium features, diagnostics and experimental functionality.
+
+Examples:
+
+* [examples/popups.rs](../tests/popups.rs)
+* [examples/css-to-shader.rs](../tests/css-to-shader.rs)
+
+## GPU mode selection
+
+Control how Chromium performs rendering.
+
+### Automatic (default)
+
+```rust
+use kurogane::{App, GpuMode};
+
+fn main() {
+    App::new("frontend")
+        .gpu_mode(GpuMode::Auto)
+        .run_or_exit();
+}
+```
+
+Kurogane automatically selects an appropriate backend for the current environment.
+
+### Hardware acceleration
+
+```rust
+use kurogane::{App, GpuMode};
+
+fn main() {
+    App::new("frontend")
+        .gpu_mode(GpuMode::Hardware)
+        .run_or_exit();
+}
+```
+
+Forces GPU acceleration.
+
+### Software rendering
+
+```rust
+use kurogane::{App, GpuMode};
+
+fn main() {
+    App::new("frontend")
+        .gpu_mode(GpuMode::Software)
+        .run_or_exit();
+}
+```
+
+Useful for:
+
+* Virtual machines
+* CI environments
+* Remote desktop sessions
+
+### Disable GPU acceleration
+
+```rust
+use kurogane::{App, GpuMode};
+
+fn main() {
+    App::new("frontend")
+        .gpu_mode(GpuMode::Disabled)
+        .run_or_exit();
+}
+```
+
+Disables GPU compositing and hardware acceleration.
+
+## Custom runtime integration
+
+Use `start()` when integrating Kurogane into an existing event loop or application runtime.
+
+```rust
+use std::time::Duration;
+
+use kurogane::App;
+
+fn main() {
+    let runtime = App::url("https://example.com")
+        .start()
+        .expect("Kurogane failed to initialize");
+
+    while !runtime.should_shutdown() {
+        runtime.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+
+    runtime.shutdown();
+}
+```
+
+Useful for:
+
+* Custom event loops
+* Game engines
+* Framework integrations
+
+See:
+
+* [examples/pump.rs](../tests/pump.rs)
+
+## Advanced: Integrating with winit
+
+Kurogane supports multiple integration strategies for `winit`, including:
+
+* Polling
+* Fixed-interval pumping
+* Scheduler-driven pumping
+* Native embedding
+
+For detailed examples and guidance, see:
+
+* [docs/winit.md](winit.md)
+
+## Advanced: Browser delegates
+
+Browser delegates expose browser-process lifecycle hooks.
+
+```rust
+use cef::*;
+use kurogane::App;
+
+struct BrowserDelegate;
+
+impl kurogane::ClientAppBrowserDelegate for BrowserDelegate {
+    fn on_context_initialized(&self) {
+        println!("browser context initialized");
+    }
+}
+
+fn main() {
+    App::url("https://example.com")
+        .delegate(BrowserDelegate)
+        .run_or_exit();
+}
+```
+
+Useful for:
+
+* browser process initialization
+* Chromium integration
+* diagnostics and logging
+
+See:
+
+* [examples/delegates.rs](../tests/delegates.rs)
+
+## Advanced: Renderer delegates
+
+Renderer delegates expose renderer-process lifecycle hooks.
+
+```rust
+use cef::*;
+use kurogane::App;
+
+struct RendererDelegate;
+
+impl kurogane::ClientAppRendererDelegate for RendererDelegate {
+    fn on_context_created(
+        &self,
+        _browser: Option<&Browser>,
+        _frame: Option<&Frame>,
+        _context: Option<&V8Context>,
+    ) {
+        println!("context created");
+    }
+}
+
+fn main() {
+    App::url("https://example.com")
+        .renderer_delegate(RendererDelegate)
+        .run_or_exit();
+}
+```
+
+Useful for:
+
+* JavaScript injection
+* V8 integration
+* renderer diagnostics
+* custom renderer behavior
+
+See:
+
+* [examples/delegates.rs](../tests/delegates.rs)
