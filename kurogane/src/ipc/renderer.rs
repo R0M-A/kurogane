@@ -625,3 +625,116 @@ wrap_v8_handler! {
         }
     }
 }
+
+//
+// Event on handler
+//
+
+wrap_v8_handler! {
+    pub struct IpcOnHandler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            exception: Option<&mut CefString>,
+        ) -> i32 {
+            let args = match arguments {
+                Some(a) if a.len() >= 2 => a,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("on(eventName, callback) requires two arguments");
+                    }
+                    return 0;
+                }
+            };
+
+            let event_name = match args.first() {
+                Some(Some(v)) if v.is_string() != 0 => v8_to_string(v),
+                _ => {
+                    if let Some(exc) = exception { *exc = CefString::from("event name must be a string"); }
+                    return 0;
+                }
+            };
+
+            if event_name.is_empty() {
+                if let Some(exc) = exception { *exc = CefString::from("event name cannot be empty"); }
+                return 0;
+            }
+
+            let callback = match args.get(1) {
+                Some(Some(v)) if v.is_function() != 0 => v,
+                _ => {
+                    if let Some(exc) = exception { *exc = CefString::from("second argument must be a function"); }
+                    return 0;
+                }
+            };
+
+            let context = match v8_context_get_current_context() {
+                Some(ctx) => ctx,
+                None => {
+                    if let Some(exc) = exception { *exc = CefString::from("on: no active renderer context"); }
+                    return 0;
+                }
+            };
+
+            let id = event_registry().lock().unwrap().register(
+                &event_name,
+                context.clone(),
+                callback.clone(),
+            );
+
+            debug!("[IPC Renderer] event on '{}' id={}", event_name, id);
+
+            if let Some(ret) = retval {
+                *ret = v8_value_create_uint(id as u32);
+            }
+
+            1
+        }
+    }
+}
+
+//
+// Event off handler
+//
+
+wrap_v8_handler! {
+    pub struct IpcOffHandler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            exception: Option<&mut CefString>,
+        ) -> i32 {
+            let args = match arguments {
+                Some(a) if !a.is_empty() => a,
+                _ => {
+                    if let Some(exc) = exception { *exc = CefString::from("off requires an id argument"); }
+                    return 0;
+                }
+            };
+
+            let id = match args.first() {
+                Some(Some(v)) if v.is_int() != 0 || v.is_uint() != 0 => v.int_value() as i64,
+                _ => {
+                    if let Some(exc) = exception { *exc = CefString::from("off: id must be an integer"); }
+                    return 0;
+                }
+            };
+
+            let removed = event_registry().lock().unwrap().unregister(id);
+            if let Some(ret) = retval {
+                *ret = v8_value_create_bool(if removed { 1 } else { 0 });
+            }
+            1
+        }
+    }
+}
