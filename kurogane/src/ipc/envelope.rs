@@ -47,12 +47,15 @@ pub const EVENT_UNSUBSCRIBE: u8 = 1;
 pub const EVENT_EMIT: u8 = 2;
 
 /// Stream protocol opcodes.
-/// Stream messages are currently renderer-to-browser only.
 pub const STREAM_OPEN: u8 = 0;
 pub const STREAM_DATA: u8 = 1;
 pub const STREAM_END: u8 = 2;
 pub const STREAM_ERROR: u8 = 3;
 pub const STREAM_CANCEL: u8 = 4;
+
+pub const STREAM_BROWSER_DATA: u8 = 5;
+pub const STREAM_BROWSER_END: u8 = 6;
+pub const STREAM_BROWSER_ERROR: u8 = 7;
 
 /// Payload encoding identifiers.
 pub const PAYLOAD_EMPTY: u8 = 0;

@@ -21,4 +21,4 @@ pub use router::IpcRouter;
 pub use rpc::{RpcSubsystem, IpcResponder, SyncRpcHandler, AsyncRpcHandler};
 pub use binary::{BinarySubsystem, BinaryResponder, SyncBinaryHandler, AsyncBinaryHandler};
 pub use event::EventSubsystem;
-pub use stream::{StreamSubsystem, StreamHandler};
+pub use stream::{StreamSubsystem, StreamHandler, StreamResponder};

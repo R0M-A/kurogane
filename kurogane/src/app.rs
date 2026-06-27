@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use cef::*;
 use crate::app::resolver::ResolvedFrontend;
-use crate::ipc::{IpcRouter, RpcSubsystem, BinarySubsystem, EventSubsystem, StreamSubsystem, StreamHandler, IpcResponder, BinaryResponder, SyncRpcHandler, SyncBinaryHandler, AsyncRpcHandler, AsyncBinaryHandler, IpcContext};
+use crate::ipc::{IpcRouter, RpcSubsystem, BinarySubsystem, EventSubsystem, StreamSubsystem, StreamHandler, StreamResponder, IpcResponder, BinaryResponder, SyncRpcHandler, SyncBinaryHandler, AsyncRpcHandler, AsyncBinaryHandler, IpcContext};
 use crate::runtime::{RuntimeBootstrap, Runtime};
 use crate::error::RuntimeError;
 use crate::spec::{RuntimeSpec, RuntimeMode};
@@ -356,7 +356,7 @@ impl App {
     /// Panics if a handler with the same name is already registered.
     pub fn stream_handler<F>(mut self, name: impl Into<String>, handler: F) -> Self
     where
-        F: Fn(u32, &[u8], bool, &str, IpcContext) -> Result<(), String> + Send + Sync + 'static,
+        F: Fn(u32, &[u8], bool, &str, StreamResponder, IpcContext) -> Result<(), String> + Send + Sync + 'static,
     {
         let name = name.into();
 

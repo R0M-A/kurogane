@@ -38,6 +38,7 @@ pub fn route_renderer(frame: &mut Frame, data: &[u8]) -> bool {
         SUB_RPC => crate::ipc::rpc::renderer::handle_rpc_renderer(frame, &envelope, payload),
         SUB_BINARY => crate::ipc::binary::renderer::handle_binary_renderer(frame, &envelope, payload),
         SUB_EVENT => crate::ipc::event::renderer::handle_event_renderer(frame, &envelope, payload),
+        SUB_STREAM => crate::ipc::stream::renderer::handle_stream_renderer(frame, &envelope, payload),
         _ => {
             debug!("[Router Renderer] unknown subsystem {}", envelope.subsystem);
             false

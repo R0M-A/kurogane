@@ -12,20 +12,20 @@ use crate::debug;
 use crate::ipc::browser_state::IpcContext;
 use crate::ipc::envelope::{Envelope, STREAM_OPEN, STREAM_DATA, STREAM_END, STREAM_ERROR, STREAM_CANCEL, decode_cmd_payload};
 use crate::ipc::rpc::PendingEntry;
-use crate::ipc::stream::StreamSubsystem;
+use crate::ipc::stream::{StreamResponder, StreamSubsystem};
 
 impl StreamSubsystem {
     /// Handle a stream message arriving from the renderer (browser-side dispatch).
     pub fn handle_browser(
         &self,
-        _frame: &mut Frame,
+        frame: &mut Frame,
         envelope: &Envelope,
         payload: &[u8],
         ctx: IpcContext,
         pending_clone: crate::ipc::rpc::PendingMap,
     ) -> bool {
         match envelope.opcode {
-            STREAM_OPEN => self.on_open(envelope, payload, ctx, pending_clone),
+            STREAM_OPEN => self.on_open(frame, envelope, payload, ctx, pending_clone),
             STREAM_DATA => self.on_data(envelope, payload, ctx),
             STREAM_END => self.on_end(envelope, payload, ctx),
             STREAM_ERROR => self.on_error(envelope, payload, ctx),
@@ -42,11 +42,14 @@ impl StreamSubsystem {
         if let Some(bid) = ctx.browser_id {
             self.pending.cancel(bid, id);
         }
+        let stream_id = envelope.correlation_id;
+        self.streams.lock().unwrap().remove(&stream_id);
         true
     }
 
     fn on_open(
         &self,
+        frame: &mut Frame,
         envelope: &Envelope,
         payload: &[u8],
         ctx: IpcContext,
@@ -80,7 +83,7 @@ impl StreamSubsystem {
 
         {
             let mut streams = self.streams.lock().unwrap();
-            streams.insert(stream_id, (handler_name.to_string(), browser_id));
+            streams.insert(stream_id, (handler_name.to_string(), browser_id, frame.clone()));
         }
 
         debug!(
@@ -99,10 +102,10 @@ impl StreamSubsystem {
         ctx: IpcContext,
     ) -> bool {
         let stream_id = envelope.correlation_id;
-        let (handler_name, browser_id) = {
+        let (handler_name, browser_id, frame) = {
             let streams = self.streams.lock().unwrap();
             match streams.get(&stream_id) {
-                Some((h, b)) => (h.clone(), *b),
+                Some((h, b, f)) => (h.clone(), *b, f.clone()),
                 None => {
                     debug!("[Stream Browser] data for unknown stream {}", stream_id);
                     return false;
@@ -123,7 +126,8 @@ impl StreamSubsystem {
             }
         };
 
-        if let Err(e) = handler(stream_id, payload, false, &handler_name, ctx) {
+        let responder = StreamResponder::new(frame, stream_id);
+        if let Err(e) = handler(stream_id, payload, false, &handler_name, responder, ctx) {
             debug!("[Stream Browser] stream handler error: {}", e);
         }
 
@@ -138,7 +142,7 @@ impl StreamSubsystem {
     ) -> bool {
         let stream_id = envelope.correlation_id;
 
-        let (handler_name, browser_id) = {
+        let (handler_name, browser_id, frame) = {
             let mut streams = self.streams.lock().unwrap();
             match streams.remove(&stream_id) {
                 Some(s) => s,
@@ -167,7 +171,8 @@ impl StreamSubsystem {
             }
         };
 
-        if let Err(e) = handler(stream_id, payload, true, &handler_name, ctx) {
+        let responder = StreamResponder::new(frame, stream_id);
+        if let Err(e) = handler(stream_id, payload, true, &handler_name, responder, ctx) {
             debug!("[Stream Browser] stream end handler error: {}", e);
         }
 
@@ -186,7 +191,7 @@ impl StreamSubsystem {
         let (_handler_name, browser_id) = {
             let mut streams = self.streams.lock().unwrap();
             match streams.remove(&stream_id) {
-                Some(s) => s,
+                Some((h, b, _f)) => (h, b),
                 None => {
                     debug!("[Stream Browser] error for unknown stream {}", stream_id);
                     return false;

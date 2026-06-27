@@ -135,6 +135,43 @@
         window.core.endStream(streamId, result || '');
     }
 
+    /**
+     * Register a callback for incoming data chunks on a stream.
+     *
+     * The callback receives an ArrayBuffer with each chunk.
+     * Callbacks are persistent — they fire for every chunk until the stream ends or errors.
+     *
+     * @param {number} streamId
+     * @param {Function} callback - receives (ArrayBuffer data)
+     */
+    function onStreamData(streamId, callback) {
+        window.core.onStreamData(streamId, callback);
+    }
+
+    /**
+     * Register a callback for stream completion.
+     *
+     * Fires once when the browser signals the stream is done.
+     *
+     * @param {number} streamId
+     * @param {Function} callback - receives (string result)
+     */
+    function onStreamEnd(streamId, callback) {
+        window.core.onStreamEnd(streamId, callback);
+    }
+
+    /**
+     * Register a callback for stream errors.
+     *
+     * Fires once when the browser signals a stream error.
+     *
+     * @param {number} streamId
+     * @param {Function} callback - receives (string errorMessage)
+     */
+    function onStreamError(streamId, callback) {
+        window.core.onStreamError(streamId, callback);
+    }
+
     window.kurogane = Object.freeze({
         invoke,
         invokeBinary,
@@ -144,6 +181,9 @@
         openStream,
         writeStream,
         endStream,
+        onStreamData,
+        onStreamEnd,
+        onStreamError,
         version: "0.0.5"
     });
 

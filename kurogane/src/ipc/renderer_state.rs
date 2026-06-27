@@ -125,12 +125,81 @@ pub fn clear_context_events(ctx: &V8Context) {
     event_registry().lock().unwrap().clear_context(ctx);
 }
 
-//
-// Promise registry: Tracks pending promises awaiting responses from the browser process
-//
+/// Stream callback registry: Tracks data/end/error callbacks registered via core.onStreamData/End/Error.
+#[derive(Default)]
+pub struct StreamCallbackRegistry {
+    data_callbacks: HashMap<i32, (V8Context, V8Value)>,
+    end_callbacks: HashMap<i32, (V8Context, V8Value)>,
+    error_callbacks: HashMap<i32, (V8Context, V8Value)>,
+}
+
+impl StreamCallbackRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_data(&mut self, stream_id: i32, ctx: V8Context, callback: V8Value) {
+        self.data_callbacks.insert(stream_id, (ctx, callback));
+    }
+
+    pub fn register_end(&mut self, stream_id: i32, ctx: V8Context, callback: V8Value) {
+        self.end_callbacks.insert(stream_id, (ctx, callback));
+    }
+
+    pub fn register_error(&mut self, stream_id: i32, ctx: V8Context, callback: V8Value) {
+        self.error_callbacks.insert(stream_id, (ctx, callback));
+    }
+
+    /// Clone the data callback for invocation (persistent; does not remove).
+    pub fn collect_data(&self, stream_id: i32) -> Option<(V8Context, V8Value)> {
+        self.data_callbacks.get(&stream_id).map(|(ctx, cb)| (ctx.clone(), cb.clone()))
+    }
+
+    /// Remove and return the end callback (one-shot).
+    pub fn take_end(&mut self, stream_id: i32) -> Option<(V8Context, V8Value)> {
+        self.end_callbacks.remove(&stream_id)
+    }
+
+    /// Remove and return the error callback (one-shot).
+    pub fn take_error(&mut self, stream_id: i32) -> Option<(V8Context, V8Value)> {
+        self.error_callbacks.remove(&stream_id)
+    }
+
+    /// Remove all callbacks for a stream.
+    pub fn clear_stream(&mut self, stream_id: i32) {
+        self.data_callbacks.remove(&stream_id);
+        self.end_callbacks.remove(&stream_id);
+        self.error_callbacks.remove(&stream_id);
+    }
+
+    /// Remove all callbacks for a given V8 context.
+    pub fn clear_context(&mut self, ctx: &V8Context) {
+        let mut target = ctx.clone();
+        self.data_callbacks.retain(|_, (stored_ctx, _)| {
+            stored_ctx.is_same(Some(&mut target)) == 0
+        });
+        self.end_callbacks.retain(|_, (stored_ctx, _)| {
+            stored_ctx.is_same(Some(&mut target)) == 0
+        });
+        self.error_callbacks.retain(|_, (stored_ctx, _)| {
+            stored_ctx.is_same(Some(&mut target)) == 0
+        });
+    }
+}
+
+static STREAM_CALLBACK_REGISTRY: OnceLock<Mutex<StreamCallbackRegistry>> = OnceLock::new();
+
+pub fn stream_callback_registry() -> &'static Mutex<StreamCallbackRegistry> {
+    STREAM_CALLBACK_REGISTRY.get_or_init(Default::default)
+}
+
+pub fn clear_context_streams(ctx: &V8Context) {
+    stream_callback_registry().lock().unwrap().clear_context(ctx);
+}
 
 pub type IpcId = i32;
 
+/// Promise registry: Tracks pending promises awaiting responses from the browser process
 pub struct PromiseRegistry {
     next_id: IpcId,
     pending: HashMap<IpcId, (V8Context, V8Value, u8)>,

@@ -10,7 +10,7 @@ use crate::debug;
 use crate::ipc::envelope::*;
 use crate::ipc::transport::message::{build_message, build_message_parts, extract_message};
 use crate::ipc::router;
-use crate::ipc::renderer_state::{register_promise, cancel_promise, clear_context_promises, clear_context_events, event_registry, registry};
+use crate::ipc::renderer_state::{register_promise, cancel_promise, clear_context_promises, clear_context_events, clear_context_streams, event_registry, stream_callback_registry, registry};
 use crate::bridge;
 
 //
@@ -218,6 +218,43 @@ wrap_render_process_handler! {
                 V8Propertyattribute::default(),
             );
 
+            // Stream callback registration handlers
+            let mut on_stream_data_handler = IpcOnStreamDataHandler::new();
+            let mut on_stream_data = v8_value_create_function(
+                Some(&CefString::from("onStreamData")),
+                Some(&mut on_stream_data_handler),
+            ).unwrap();
+
+            core.set_value_bykey(
+                Some(&CefString::from("onStreamData")),
+                Some(&mut on_stream_data),
+                V8Propertyattribute::default(),
+            );
+
+            let mut on_stream_end_handler = IpcOnStreamEndHandler::new();
+            let mut on_stream_end = v8_value_create_function(
+                Some(&CefString::from("onStreamEnd")),
+                Some(&mut on_stream_end_handler),
+            ).unwrap();
+
+            core.set_value_bykey(
+                Some(&CefString::from("onStreamEnd")),
+                Some(&mut on_stream_end),
+                V8Propertyattribute::default(),
+            );
+
+            let mut on_stream_error_handler = IpcOnStreamErrorHandler::new();
+            let mut on_stream_error = v8_value_create_function(
+                Some(&CefString::from("onStreamError")),
+                Some(&mut on_stream_error_handler),
+            ).unwrap();
+
+            core.set_value_bykey(
+                Some(&CefString::from("onStreamError")),
+                Some(&mut on_stream_error),
+                V8Propertyattribute::default(),
+            );
+
             global.set_value_bykey(
                 Some(&CefString::from("core")),
                 Some(&mut core),
@@ -255,6 +292,7 @@ wrap_render_process_handler! {
             if let Some(ctx) = context {
                 clear_context_promises(ctx);
                 clear_context_events(ctx);
+                clear_context_streams(ctx);
             }
         }
 
@@ -958,6 +996,16 @@ wrap_v8_handler! {
                 return 1;
             }
 
+            // Resolve promise immediately with the stream id
+            if context.enter() == 0 {
+                registry().lock().unwrap().take(stream_id);
+                return 0;
+            }
+            let mut stream_id_v8 = v8_value_create_uint(stream_id as u32).unwrap();
+            promise.resolve_promise(Some(&mut stream_id_v8));
+            context.exit();
+            registry().lock().unwrap().take(stream_id);
+
             if let Some(ret) = retval {
                 *ret = Some(promise);
             }
@@ -1121,6 +1169,222 @@ wrap_v8_handler! {
                 *ret = v8_value_create_uint(1);
             }
 
+            1
+        }
+    }
+}
+
+//
+// Stream data callback handler
+//
+
+wrap_v8_handler! {
+    pub struct IpcOnStreamDataHandler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            exception: Option<&mut CefString>,
+        ) -> i32 {
+            let args = match arguments {
+                Some(a) if a.len() >= 2 => a,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamData(streamId, callback) requires two arguments");
+                    }
+                    return 0;
+                }
+            };
+
+            let stream_id = match args.first() {
+                Some(Some(v)) if v.is_int() != 0 || v.is_uint() != 0 => v.int_value(),
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamData: streamId must be an integer");
+                    }
+                    return 0;
+                }
+            };
+
+            let callback = match args.get(1) {
+                Some(Some(v)) if v.is_function() != 0 => v,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamData: second argument must be a function");
+                    }
+                    return 0;
+                }
+            };
+
+            let context = match v8_context_get_current_context() {
+                Some(ctx) => ctx,
+                None => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamData: no active renderer context");
+                    }
+                    return 0;
+                }
+            };
+
+            stream_callback_registry().lock().unwrap().register_data(
+                stream_id,
+                context.clone(),
+                callback.clone(),
+            );
+
+            debug!("[IPC Renderer] onStreamData stream_id={}", stream_id);
+
+            if let Some(ret) = retval {
+                *ret = v8_value_create_uint(1);
+            }
+            1
+        }
+    }
+}
+
+//
+// Stream end callback handler
+//
+
+wrap_v8_handler! {
+    pub struct IpcOnStreamEndHandler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            exception: Option<&mut CefString>,
+        ) -> i32 {
+            let args = match arguments {
+                Some(a) if a.len() >= 2 => a,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamEnd(streamId, callback) requires two arguments");
+                    }
+                    return 0;
+                }
+            };
+
+            let stream_id = match args.first() {
+                Some(Some(v)) if v.is_int() != 0 || v.is_uint() != 0 => v.int_value(),
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamEnd: streamId must be an integer");
+                    }
+                    return 0;
+                }
+            };
+
+            let callback = match args.get(1) {
+                Some(Some(v)) if v.is_function() != 0 => v,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamEnd: second argument must be a function");
+                    }
+                    return 0;
+                }
+            };
+
+            let context = match v8_context_get_current_context() {
+                Some(ctx) => ctx,
+                None => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamEnd: no active renderer context");
+                    }
+                    return 0;
+                }
+            };
+
+            stream_callback_registry().lock().unwrap().register_end(
+                stream_id,
+                context.clone(),
+                callback.clone(),
+            );
+
+            debug!("[IPC Renderer] onStreamEnd stream_id={}", stream_id);
+
+            if let Some(ret) = retval {
+                *ret = v8_value_create_uint(1);
+            }
+            1
+        }
+    }
+}
+
+//
+// Stream error callback handler
+//
+
+wrap_v8_handler! {
+    pub struct IpcOnStreamErrorHandler;
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefString>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<V8Value>>,
+            exception: Option<&mut CefString>,
+        ) -> i32 {
+            let args = match arguments {
+                Some(a) if a.len() >= 2 => a,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamError(streamId, callback) requires two arguments");
+                    }
+                    return 0;
+                }
+            };
+
+            let stream_id = match args.first() {
+                Some(Some(v)) if v.is_int() != 0 || v.is_uint() != 0 => v.int_value(),
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamError: streamId must be an integer");
+                    }
+                    return 0;
+                }
+            };
+
+            let callback = match args.get(1) {
+                Some(Some(v)) if v.is_function() != 0 => v,
+                _ => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamError: second argument must be a function");
+                    }
+                    return 0;
+                }
+            };
+
+            let context = match v8_context_get_current_context() {
+                Some(ctx) => ctx,
+                None => {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("onStreamError: no active renderer context");
+                    }
+                    return 0;
+                }
+            };
+
+            stream_callback_registry().lock().unwrap().register_error(
+                stream_id,
+                context.clone(),
+                callback.clone(),
+            );
+
+            debug!("[IPC Renderer] onStreamError stream_id={}", stream_id);
+
+            if let Some(ret) = retval {
+                *ret = v8_value_create_uint(1);
+            }
             1
         }
     }
