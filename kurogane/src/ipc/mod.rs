@@ -16,6 +16,7 @@ pub mod request_response;
 pub mod router;
 pub mod browser;
 pub mod renderer;
+pub mod handle_cell;
 
 // Public exports for the rest of the application
 pub use browser::handle_ipc_message;
@@ -27,3 +28,4 @@ pub use rpc::{IpcResponder, SyncRpcHandler, AsyncRpcHandler};
 pub use binary::{BinaryResponder, SyncBinaryHandler, AsyncBinaryHandler};
 pub use event::EventSubsystem;
 pub use stream::{StreamSubsystem, StreamHandler, StreamFactory, StreamResponder};
+pub use handle_cell::AppCell;

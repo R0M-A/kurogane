@@ -10,8 +10,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use cef::*;
 use crate::app::resolver::ResolvedFrontend;
-use crate::ipc::{IpcRouter, RequestResponseSubsystem, EventSubsystem, StreamSubsystem, StreamFactory, IpcResponder, BinaryResponder, SyncHandler, AsyncHandler, IpcContext};
-use crate::runtime::{RuntimeBootstrap, Runtime};
+use crate::ipc::{AppCell, IpcRouter, RequestResponseSubsystem, EventSubsystem, StreamSubsystem, StreamFactory, IpcResponder, BinaryResponder, SyncHandler, AsyncHandler, IpcContext};
+use crate::runtime::{RuntimeBootstrap, AppHandle, AppInstance};
 use crate::error::RuntimeError;
 use crate::spec::{RuntimeSpec, RuntimeMode};
 use crate::chromium_flags::ChromiumFlag;
@@ -32,7 +32,7 @@ pub enum PumpRequest {
 
 /// Callback type for pump scheduling.
 ///
-/// CEF calls this whenever it wants Runtime::pump to be called.
+/// CEF calls this whenever it wants AppInstance::pump to be called.
 /// The integrator decides how to honour the request via a winit proxy, a glib timeout, a Tokio task, or anything else.
 pub type PumpScheduler = Arc<dyn Fn(PumpRequest) + Send + Sync>;
 
@@ -153,97 +153,6 @@ pub trait ClientAppRendererDelegate: Send + Sync {
     }
 }
 
-/// Internal handler variant for unified command registration.
-pub enum Handler {
-    Sync(SyncHandler),
-    Async(AsyncHandler),
-}
-
-/// Converts a user-facing closure into an internal handler.
-pub trait IntoHandler {
-    fn into_handler(self) -> Handler;
-}
-
-pub struct SyncJson<F>(pub F);
-pub struct SyncBinary<F>(pub F);
-pub struct AsyncJson<F>(pub F);
-pub struct AsyncBinary<F>(pub F);
-
-impl<F> IntoHandler for SyncJson<F>
-where
-    F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
-{
-    fn into_handler(self) -> Handler {
-        let f = self.0;
-        Handler::Sync(Box::new(move |data: &[u8], _ctx: IpcContext| {
-            let s = std::str::from_utf8(data).map_err(|e| e.to_string())?;
-            let input: Value = if s.is_empty() {
-                Value::Null
-            } else {
-                serde_json::from_str(s)
-                    .map_err(|e| format!("invalid JSON payload: {e}"))?
-            };
-            let output = f(input)?;
-            serde_json::to_string(&output)
-                .map_err(|e| format!("JSON serialization error: {e}"))
-                .map(|s| s.into_bytes())
-        }))
-    }
-}
-
-impl<F> IntoHandler for SyncBinary<F>
-where
-    F: Fn(&[u8]) -> Result<Vec<u8>, String> + Send + Sync + 'static,
-{
-    fn into_handler(self) -> Handler {
-        let f = self.0;
-        Handler::Sync(Box::new(move |data: &[u8], _ctx: IpcContext| f(data)))
-    }
-}
-
-impl<F> IntoHandler for AsyncJson<F>
-where
-    F: Fn(Value, IpcResponder) + Send + Sync + 'static,
-{
-    fn into_handler(self) -> Handler {
-        let f = self.0;
-        Handler::Async(Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| {
-            let s = std::str::from_utf8(data).unwrap_or("");
-            let value: Value = if s.is_empty() {
-                Value::Null
-            } else {
-                match serde_json::from_str(s) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        responder.resolve(Err(format!("invalid JSON: {e}")), 0);
-                        return;
-                    }
-                }
-            };
-            let r = IpcResponder::new(Box::new(move |result, code| {
-                responder.resolve(result.map(|s| s.into_bytes()), code);
-            }));
-            f(value, r)
-        }))
-    }
-}
-
-impl<F> IntoHandler for AsyncBinary<F>
-where
-    F: Fn(&[u8], BinaryResponder) + Send + Sync + 'static,
-{
-    fn into_handler(self) -> Handler {
-        let f = self.0;
-        Handler::Async(Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| f(data, responder)))
-    }
-}
-
-/// Helper constructors for the handler wrapper types.
-pub fn sync_json<F>(f: F) -> SyncJson<F> { SyncJson(f) }
-pub fn sync_binary<F>(f: F) -> SyncBinary<F> { SyncBinary(f) }
-pub fn async_json<F>(f: F) -> AsyncJson<F> { AsyncJson(f) }
-pub fn async_binary<F>(f: F) -> AsyncBinary<F> { AsyncBinary(f) }
-
 /// Public application builder.
 ///
 /// Configures how the first browser instance starts.
@@ -252,6 +161,9 @@ pub struct App {
     sync_handlers: HashMap<String, SyncHandler>,
     async_handlers: HashMap<String, AsyncHandler>,
     stream_handlers: HashMap<String, StreamFactory>,
+
+    cell: AppCell,
+    resolver: Option<crate::ipc::handle_cell::AppCellResolver>,
 
     profile_id: Option<String>,
     persist_session_cookies: bool,
@@ -274,11 +186,14 @@ impl App {
     }
 
     fn with_source(source: Source) -> Self {
+        let (cell, resolver) = AppCell::new();
         Self {
             source,
             sync_handlers: HashMap::new(),
             async_handlers: HashMap::new(),
             stream_handlers: HashMap::new(),
+            cell,
+            resolver: Some(resolver),
 
             profile_id: None,
             persist_session_cookies: true,
@@ -287,6 +202,15 @@ impl App {
             scheduler: None,
             delegates: Vec::new(),
             renderer_delegates: Vec::new(),
+        }
+    }
+
+    fn guard_unique_name(&self, name: &str) {
+        if self.sync_handlers.contains_key(name)
+            || self.async_handlers.contains_key(name)
+            || self.stream_handlers.contains_key(name)
+        {
+            panic!("handler '{name}' registered twice");
         }
     }
 
@@ -306,7 +230,7 @@ impl App {
     ///
     /// When CEF determines it needs work done, it will call this closure
     /// with a PumpRequest indicating how urgently. The integrator is
-    /// responsible for calling Runtime::pump accordingly.
+    /// responsible for calling AppInstance::pump accordingly.
     ///
     /// Only meaningful when using App::start_embedded / App::start
     pub fn scheduler<F>(mut self, f: F) -> Self
@@ -317,30 +241,103 @@ impl App {
         self
     }
 
-    /// Registers a command handler.
+    /// Registers a synchronous JSON command handler.
     ///
-    /// Supports synchronous and asynchronous handlers for both JSON and binary
-    /// commands. The handler type determines how the command is registered.
+    /// The closure receives the deserialized payload and a reference to the
+    /// shared runtime handle. Use the handle to broadcast events, spawn
+    /// background work, or query runtime state.
     ///
-    /// Panics if a command with the same name has already been registered.
-    pub fn command(mut self, name: impl Into<String>, handler: impl IntoHandler) -> Self {
+    /// Ignore it with _ when not needed.
+    ///
+    /// Panics if a handler with the same name has already been registered.
+    pub fn command<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(Value, &AppHandle) -> Result<Value, String> + Send + Sync + 'static,
+    {
         let name = name.into();
-
-        if self.sync_handlers.contains_key(&name)
-            || self.async_handlers.contains_key(&name)
-            || self.stream_handlers.contains_key(&name)
-        {
-            panic!("command '{name}' registered twice");
-        }
-
-        match handler.into_handler() {
-            Handler::Sync(h) => { self.sync_handlers.insert(name, h); }
-            Handler::Async(h) => { self.async_handlers.insert(name, h); }
-        }
+        self.guard_unique_name(&name);
+        let cell = self.cell.clone();
+        self.sync_handlers.insert(name, Box::new(move |data: &[u8], _ctx: IpcContext| {
+            let s = std::str::from_utf8(data).map_err(|e| e.to_string())?;
+            let input = if s.is_empty() { Value::Null } else { serde_json::from_str(s).map_err(|e| format!("invalid JSON payload: {e}"))? };
+            let output = f(input, cell.get())?;
+            serde_json::to_string(&output).map_err(|e| format!("JSON serialization error: {e}")).map(|s| s.into_bytes())
+        }));
         self
     }
 
-    /// Registers a stream handler.
+    /// Registers an asynchronous JSON command handler.
+    ///
+    /// The closure receives the deserialized payload, an IpcResponder to
+    /// send the response later and the shared runtime handle.
+    ///
+    /// Panics if a handler with the same name has already been registered.
+    pub fn async_command<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(Value, IpcResponder, &AppHandle) + Send + Sync + 'static,
+    {
+        let name = name.into();
+        self.guard_unique_name(&name);
+        let cell = self.cell.clone();
+        self.async_handlers.insert(name, Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| {
+            let s = std::str::from_utf8(data).unwrap_or("");
+            let value: Value = if s.is_empty() {
+                Value::Null
+            } else {
+                match serde_json::from_str(s) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        responder.resolve(Err(format!("invalid JSON: {e}")), 0);
+                        return;
+                    }
+                }
+            };
+            let r = IpcResponder::new(Box::new(move |result, code| {
+                responder.resolve(result.map(|s| s.into_bytes()), code);
+            }));
+            f(value, r, cell.get())
+        }));
+        self
+    }
+
+    /// Registers a synchronous binary command handler.
+    ///
+    /// The closure receives the raw payload bytes and the shared runtime handle.
+    ///
+    /// Panics if a handler with the same name has already been registered.
+    pub fn binary_command<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(&[u8], &AppHandle) -> Result<Vec<u8>, String> + Send + Sync + 'static,
+    {
+        let name = name.into();
+        self.guard_unique_name(&name);
+        let cell = self.cell.clone();
+        self.sync_handlers.insert(name, Box::new(move |data: &[u8], _ctx: IpcContext| {
+            f(data, cell.get())
+        }));
+        self
+    }
+
+    /// Registers an asynchronous binary command handler.
+    ///
+    /// The closure receives the payload bytes (owned), a BinaryResponder to
+    /// send the response later and the shared runtime handle.
+    ///
+    /// Panics if a handler with the same name has already been registered.
+    pub fn async_binary_command<F>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(Vec<u8>, BinaryResponder, &AppHandle) + Send + Sync + 'static,
+    {
+        let name = name.into();
+        self.guard_unique_name(&name);
+        let cell = self.cell.clone();
+        self.async_handlers.insert(name, Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| {
+            f(data.to_vec(), responder, cell.get())
+        }));
+        self
+    }
+
+    /// Registers a stream handler whose factory does not need AppHandle.
     ///
     /// Stream handlers process data chunks sent from the renderer. The factory
     /// closure is called once per stream open to create a dedicated handler
@@ -353,15 +350,29 @@ impl App {
         H: crate::ipc::StreamHandler + 'static,
     {
         let name = name.into();
-
-        if self.sync_handlers.contains_key(&name)
-            || self.async_handlers.contains_key(&name)
-            || self.stream_handlers.contains_key(&name)
-        {
-            panic!("stream '{name}' registered twice");
-        }
-
+        self.guard_unique_name(&name);
         self.stream_handlers.insert(name, Box::new(move || Box::new(factory())));
+        self
+    }
+
+    /// Registers a stream handler whose factory receives &AppHandle.
+    ///
+    /// Identical to stream(Self::stream) but the factory receives a
+    /// reference to the shared runtime handle, useful for broadcasting events
+    /// or querying runtime state from within stream lifecycle callbacks.
+    ///
+    /// Panics if a handler with the same name is already registered.
+    pub fn stream_h<F, H>(mut self, name: impl Into<String>, factory: F) -> Self
+    where
+        F: Fn(&AppHandle) -> H + Send + Sync + 'static,
+        H: crate::ipc::StreamHandler + 'static,
+    {
+        let name = name.into();
+        self.guard_unique_name(&name);
+        let cell = self.cell.clone();
+        self.stream_handlers.insert(name, Box::new(move || {
+            Box::new(factory(cell.get())) as Box<dyn crate::ipc::StreamHandler>
+        }));
         self
     }
 
@@ -398,10 +409,10 @@ impl App {
         self
     }
 
-    /// Starts the runtime in embedded mode.
-    /// Intended for embedded integrations where the host application owns the
-    /// window hierarchy and event loop.
-    pub fn start_embedded(self) -> Result<Runtime, RuntimeError> {
+    /// Initialize CEF and return an AppInstance.
+    pub fn build(mut self) -> Result<AppInstance, RuntimeError> {
+        let resolver = self.resolver.take().expect("build called twice");
+
         let Self {
             source,
             sync_handlers,
@@ -414,6 +425,52 @@ impl App {
             scheduler,
             delegates,
             renderer_delegates,
+            ..
+        } = self;
+
+        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
+        let event = EventSubsystem::new();
+        let stream = StreamSubsystem::new(stream_handlers);
+        let router = Arc::new(IpcRouter::new(rpc, event, stream));
+
+        let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
+
+        let spec = RuntimeSpec {
+            mode: RuntimeMode::Views,
+            start_url,
+            asset_root,
+            profile_id,
+            persist_session_cookies,
+            gpu_mode,
+            chromium_flags,
+            scheduler,
+            delegates,
+            renderer_delegates,
+        };
+
+        let instance = RuntimeBootstrap::start(spec, router)?;
+        // Populated before the message loop starts
+        resolver.resolve(instance.handle().clone());
+        Ok(instance)
+    }
+
+    /// Starts the runtime in embedded mode.
+    pub fn start_embedded(mut self) -> Result<AppInstance, RuntimeError> {
+        let resolver = self.resolver.take().expect("start_embedded called twice");
+
+        let Self {
+            source,
+            sync_handlers,
+            async_handlers,
+            stream_handlers,
+            profile_id,
+            persist_session_cookies,
+            gpu_mode,
+            chromium_flags,
+            scheduler,
+            delegates,
+            renderer_delegates,
+            ..
         } = self;
 
         let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
@@ -436,89 +493,19 @@ impl App {
             renderer_delegates,
         };
 
-        RuntimeBootstrap::start_embedded(spec, router)
+        let instance = RuntimeBootstrap::start_embedded(spec, router)?;
+        resolver.resolve(instance.handle().clone());
+        Ok(instance)
     }
 
     /// Start the application and run the message loop.
-    ///
-    /// Kurogane owns the event loop and blocks until shutdown.
     pub fn run(self) -> Result<(), RuntimeError> {
-        let Self {
-            source,
-            sync_handlers,
-            async_handlers,
-            stream_handlers,
-            profile_id,
-            persist_session_cookies,
-            gpu_mode,
-            chromium_flags,
-            delegates,
-            renderer_delegates,
-            ..
-        } = self;
-
-        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
-        let event = EventSubsystem::new();
-        let stream = StreamSubsystem::new(stream_handlers);
-        let router = Arc::new(IpcRouter::new(rpc, event, stream));
-
-        let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
-
-        let spec = RuntimeSpec {
-            mode: RuntimeMode::Views,
-            start_url,
-            asset_root,
-            profile_id,
-            persist_session_cookies,
-            gpu_mode,
-            chromium_flags,
-            scheduler: None,
-            delegates,
-            renderer_delegates,
-        };
-
-        RuntimeBootstrap::run(spec, router)
+        self.build()?.run()
     }
 
     /// Initialize the application without entering a message loop.
-    ///
-    /// The caller becomes responsible for driving the runtime via Runtime::pump().
-    pub fn start(self) -> Result<Runtime, RuntimeError> {
-        let Self {
-            source,
-            sync_handlers,
-            async_handlers,
-            stream_handlers,
-            profile_id,
-            persist_session_cookies,
-            gpu_mode,
-            chromium_flags,
-            scheduler,
-            delegates,
-            renderer_delegates,
-        } = self;
-
-        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
-        let event = EventSubsystem::new();
-        let stream = StreamSubsystem::new(stream_handlers);
-        let router = Arc::new(IpcRouter::new(rpc, event, stream));
-
-        let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
-
-        let spec = RuntimeSpec {
-            mode: RuntimeMode::Views,
-            start_url,
-            asset_root,
-            profile_id,
-            persist_session_cookies,
-            gpu_mode,
-            chromium_flags,
-            scheduler,
-            delegates,
-            renderer_delegates,
-        };
-
-        RuntimeBootstrap::start(spec, router)
+    pub fn start(self) -> Result<AppInstance, RuntimeError> {
+        self.build()
     }
 
     /// Run the application and terminate the process on failure.
@@ -536,11 +523,11 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    fn json_noop(_: Value) -> Result<Value, String> {
+    fn json_noop(_: Value, _: &AppHandle) -> Result<Value, String> {
         Ok(Value::Null)
     }
 
-    fn binary_noop(_: &[u8]) -> Result<Vec<u8>, String> {
+    fn binary_noop(_: &[u8], _: &AppHandle) -> Result<Vec<u8>, String> {
         Ok(vec![])
     }
 
@@ -548,31 +535,31 @@ mod tests {
     #[should_panic(expected = "registered twice")]
     fn duplicate_json_command_panics() {
         App::new("./dist")
-            .command("ping", SyncJson(json_noop))
-            .command("ping", SyncJson(json_noop));
+            .command("ping", json_noop)
+            .command("ping", json_noop);
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn duplicate_binary_command_panics() {
         App::new("./dist")
-            .command("upload", SyncBinary(binary_noop))
-            .command("upload", SyncBinary(binary_noop));
+            .binary_command("upload", binary_noop)
+            .binary_command("upload", binary_noop);
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn json_and_binary_names_cannot_collide() {
         App::new("./dist")
-            .command("transfer", SyncJson(json_noop))
-            .command("transfer", SyncBinary(binary_noop));
+            .command("transfer", json_noop)
+            .binary_command("transfer", binary_noop);
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn binary_and_json_names_cannot_collide() {
         App::new("./dist")
-            .command("transfer", SyncBinary(binary_noop))
-            .command("transfer", SyncJson(json_noop));
+            .binary_command("transfer", binary_noop)
+            .command("transfer", json_noop);
     }
 }

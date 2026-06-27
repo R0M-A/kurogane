@@ -81,19 +81,27 @@ impl StreamResponder {
 /// Implement this trait to handle a stream's full lifecycle.
 /// The framework instantiates the handler via a factory closure
 /// when a stream opens, and drops it when the stream ends or errors.
+///
+/// Each callback receives a StreamResponder so handlers can send data
+/// back to the renderer without storing the responder themselves.
+///
+/// on_chunk borrows the responder (the stream continues).
+/// on_end takes ownership (the stream is consumed).
 pub trait StreamHandler: Send + 'static {
-    /// Called when the stream opens. Receives metadata and a responder
-    /// for sending data back to the renderer.
-    fn on_open(&mut self, metadata: &str, responder: StreamResponder) -> Result<(), String> {
+    /// Called when the stream opens.
+    fn on_open(&mut self, metadata: &str, responder: &StreamResponder) -> Result<(), String> {
         let _ = (metadata, responder);
         Ok(())
     }
 
     /// Called for each data chunk from the renderer.
-    fn on_chunk(&mut self, data: &[u8]) -> Result<(), String>;
+    fn on_chunk(&mut self, data: &[u8], responder: &StreamResponder) -> Result<(), String>;
 
     /// Called when the renderer closes the stream normally.
-    fn on_end(&mut self, result: &str) -> Result<(), String>;
+    fn on_end(&mut self, result: &str, responder: StreamResponder) -> Result<(), String> {
+        let _ = (result, responder);
+        Ok(())
+    }
 
     /// Called if the stream errors.
     fn on_error(&mut self, message: &str) {
@@ -111,7 +119,9 @@ pub mod renderer;
 pub struct StreamSubsystem {
     pub factories: HashMap<String, StreamFactory>,
     /// Per-stream handler instances, keyed by stream_id.
-    pub streams: std::sync::Mutex<HashMap<u32, (String, BrowserId, Box<dyn StreamHandler>)>>,
+    /// Stores the frame alongside each handler so responders can be
+    /// reconstructed on every callback instead of stored by the handler.
+    pub streams: std::sync::Mutex<HashMap<u32, (BrowserId, Box<dyn StreamHandler>, Frame)>>,
     pub pending: crate::ipc::pending::PendingMap,
 }
 
@@ -128,7 +138,7 @@ impl StreamSubsystem {
     pub fn clear_for_browser(&self, browser_id: BrowserId) -> usize {
         let mut streams = self.streams.lock().unwrap();
         let before = streams.len();
-        streams.retain(|_, (_, bid, _)| *bid != browser_id);
+        streams.retain(|_, (bid, _, _)| *bid != browser_id);
         before - streams.len()
     }
 }

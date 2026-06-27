@@ -3,6 +3,10 @@
 //! Manages the lifecycle of incoming renderer streams, including creation,
 //! chunk delivery, completion, cancellation and cleanup of active streams.
 //! Each stream gets its own handler instance from the registered factory.
+//!
+//! The frame is stored alongside each handler so StreamResponders can be
+//! reconstructed on every callback, eliminating the need for handlers to
+//! store an Option<StreamResponder> themselves.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -87,17 +91,21 @@ impl StreamSubsystem {
         };
 
         let mut handler = factory();
+
+        // Pass responder by reference
         let responder = StreamResponder::new(frame.clone(), stream_id);
 
         let metadata_str = std::str::from_utf8(metadata_bytes).unwrap_or("");
-        if let Err(e) = handler.on_open(metadata_str, responder) {
+        if let Err(e) = handler.on_open(metadata_str, &responder) {
             debug!("[Stream Browser] on_open error: {}", e);
             return false;
         }
 
+        // Store Frame alongside handler so responders can be reconstructed
+        // for every subsequent callback without the handler storing one.
         {
             let mut streams = self.streams.lock().unwrap();
-            streams.insert(stream_id, (handler_name.to_string(), browser_id, handler));
+            streams.insert(stream_id, (browser_id, handler, frame.clone()));
         }
 
         debug!(
@@ -111,16 +119,23 @@ impl StreamSubsystem {
         let stream_id = envelope.correlation_id;
 
         let mut streams = self.streams.lock().unwrap();
-        let handler = match streams.get_mut(&stream_id) {
-            Some((_, _, h)) => h,
+        let (_, handler, frame) = match streams.get_mut(&stream_id) {
+            Some(entry) => entry,
             None => {
                 debug!("[Stream Browser] data for unknown stream {}", stream_id);
                 return false;
             }
         };
 
-        if let Err(e) = handler.on_chunk(payload) {
+        // Reconstruct responder from the stored frame, the handler never
+        // needs to store one itself.
+        let responder = StreamResponder::new(frame.clone(), stream_id);
+        if let Err(e) = handler.on_chunk(payload, &responder) {
             debug!("[Stream Browser] on_chunk error: {}", e);
+            // Propagate error back to renderer
+            let _ = responder.error(&e);
+            drop(streams);
+            self.streams.lock().unwrap().remove(&stream_id);
         }
 
         true
@@ -130,19 +145,17 @@ impl StreamSubsystem {
         let stream_id = envelope.correlation_id;
         let result_str = String::from_utf8_lossy(payload).to_string();
 
-        let mut streams = self.streams.lock().unwrap();
-        match streams.get_mut(&stream_id) {
-            Some((_, _, h)) => {
-                if let Err(e) = h.on_end(&result_str) {
-                    debug!("[Stream Browser] on_end error: {}", e);
-                }
+        // Remove entry, take ownership of handler and frame
+        let entry = self.streams.lock().unwrap().remove(&stream_id);
+        if let Some((_, mut handler, frame)) = entry {
+            let responder = StreamResponder::new(frame, stream_id);
+            if let Err(e) = handler.on_end(&result_str, responder) {
+                debug!("[Stream Browser] on_end error: {}", e);
             }
-            None => {
-                debug!("[Stream Browser] end for unknown stream {}", stream_id);
-                return false;
-            }
+        } else {
+            debug!("[Stream Browser] end for unknown stream {}", stream_id);
+            return false;
         }
-        streams.remove(&stream_id);
 
         debug!("[Stream Browser] end stream_id={}", stream_id);
         true
@@ -152,17 +165,13 @@ impl StreamSubsystem {
         let stream_id = envelope.correlation_id;
         let err_msg = String::from_utf8_lossy(payload).to_string();
 
-        let mut streams = self.streams.lock().unwrap();
-        match streams.get_mut(&stream_id) {
-            Some((_, _, h)) => {
-                h.on_error(&err_msg);
-            }
-            None => {
-                debug!("[Stream Browser] error for unknown stream {}", stream_id);
-                return false;
-            }
+        let entry = self.streams.lock().unwrap().remove(&stream_id);
+        if let Some((_, mut handler, _)) = entry {
+            handler.on_error(&err_msg);
+        } else {
+            debug!("[Stream Browser] error for unknown stream {}", stream_id);
+            return false;
         }
-        streams.remove(&stream_id);
 
         debug!("[Stream Browser] error stream_id={}: {}", stream_id, err_msg);
         true

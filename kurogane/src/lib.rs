@@ -26,7 +26,7 @@ mod browser_info_map;
 #[cfg(target_os = "macos")]
 mod platform;
 
-pub use runtime::{Runtime, BrowserBounds, BrowserHandle, WindowOptions, WindowState};
+pub use runtime::{AppInstance, AppHandle, BrowserBounds, BrowserHandle, WindowOptions, WindowState};
 pub use browser_registry::{BrowserId, BrowserMetadata, BrowserType};
 pub use window_registry::{WindowId, WindowMetadata};
 pub use gpu::GpuMode;
@@ -36,9 +36,5 @@ pub use shutdown::ShutdownSignal;
 
 // Re-export IPC types for public use
 pub use crate::ipc::IpcResult;
-pub use app::{
-    PumpRequest, PumpScheduler, ClientAppBrowserDelegate, ClientAppRendererDelegate,
-    sync_json, sync_binary, async_json, async_binary, // convenience constructors
-    SyncJson, SyncBinary, AsyncJson, AsyncBinary,
-};
+pub use app::{PumpRequest, PumpScheduler, ClientAppBrowserDelegate, ClientAppRendererDelegate};
 pub use browser_info_map::{BrowserInfoMap, BrowserInfoMapVisitor, BrowserInfoMapVisitorResult};

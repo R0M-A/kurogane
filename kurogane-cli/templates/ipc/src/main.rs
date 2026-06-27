@@ -1,22 +1,22 @@
-use kurogane::{App, sync_json};
+use kurogane::App;
 use serde_json::{Value, json};
 
 fn main() {
     App::new("content")
 
         // Simple roundtrip
-        .command("ping", sync_json(|_| {
+        .command("ping", |_: Value, _: &kurogane::AppHandle| {
             Ok(json!("pong"))
-        }))
+        })
 
         // Greet user
-        .command("greet", sync_json(|payload: Value| {
+        .command("greet", |payload: Value, _: &kurogane::AppHandle| {
             let name = payload.as_str().unwrap_or("anonymous");
             Ok(json!(format!("Hello, {}!", name)))
-        }))
+        })
 
         // Computation with validation
-        .command("divide", sync_json(|payload: Value| {
+        .command("divide", |payload: Value, _: &kurogane::AppHandle| {
             let a = payload["a"]
                 .as_f64()
                 .ok_or("Missing 'a'")?;
@@ -30,7 +30,7 @@ fn main() {
             }
 
             Ok(json!(a / b))
-        }))
+        })
 
         .run_or_exit();
 }
