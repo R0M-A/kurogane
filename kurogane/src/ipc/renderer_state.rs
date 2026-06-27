@@ -38,6 +38,16 @@ impl EventCallbackRegistry {
         id
     }
 
+    /// Look up the event name for a subscription id.
+    pub fn get_event_name(&self, id: i64) -> Option<String> {
+        for (event_name, entries) in &self.callbacks {
+            if entries.iter().any(|(sid, _, _)| *sid == id) {
+                return Some(event_name.clone());
+            }
+        }
+        None
+    }
+
     /// Unregister a callback by subscription id.
     pub fn unregister(&mut self, id: i64) -> bool {
         for (_, callbacks) in self.callbacks.iter_mut() {

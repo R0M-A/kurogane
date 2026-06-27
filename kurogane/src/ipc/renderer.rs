@@ -758,11 +758,35 @@ wrap_v8_handler! {
                 }
             };
 
+            let Some(frame) = context.frame() else {
+                if let Some(exc) = exception { *exc = CefString::from("on: no frame for current context"); }
+                return 0;
+            };
+
             let id = event_registry().lock().unwrap().register(
                 &event_name,
                 context.clone(),
                 callback.clone(),
             );
+
+            let subscribe = {
+                let payload = encode_cmd_payload(&event_name, &[]);
+                let envelope = Envelope {
+                    version: ENVELOPE_VERSION,
+                    subsystem: SUB_EVENT,
+                    opcode: EVENT_SUBSCRIBE,
+                    flags: 0,
+                    correlation_id: id as u32,
+                    payload_kind: PAYLOAD_EMPTY,
+                };
+                build_message("kurogane_event", &envelope, &payload)
+            };
+
+            if let Some(mut msg) = subscribe {
+                frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
+            } else {
+                debug!("[IPC Renderer] failed to build subscribe message");
+            }
 
             debug!("[IPC Renderer] event on '{}' id={}", event_name, id);
 
@@ -807,9 +831,40 @@ wrap_v8_handler! {
                 }
             };
 
-            let removed = event_registry().lock().unwrap().unregister(id);
+            let context = match v8_context_get_current_context() {
+                Some(ctx) => ctx,
+                None => {
+                    if let Some(exc) = exception { *exc = CefString::from("off: no active renderer context"); }
+                    return 0;
+                }
+            };
+
+            let event_name = {
+                let mut registry = event_registry().lock().unwrap();
+                let name = registry.get_event_name(id);
+                registry.unregister(id);
+                name
+            };
+
+            if let Some(event_name) = event_name {
+                if let Some(frame) = context.frame() {
+                    let payload = encode_cmd_payload(&event_name, &[]);
+                    let envelope = Envelope {
+                        version: ENVELOPE_VERSION,
+                        subsystem: SUB_EVENT,
+                        opcode: EVENT_UNSUBSCRIBE,
+                        flags: 0,
+                        correlation_id: id as u32,
+                        payload_kind: PAYLOAD_EMPTY,
+                    };
+                    if let Some(mut msg) = build_message("kurogane_event", &envelope, &payload) {
+                        frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
+                    }
+                }
+            }
+
             if let Some(ret) = retval {
-                *ret = v8_value_create_bool(if removed { 1 } else { 0 });
+                *ret = v8_value_create_bool(1);
             }
             1
         }
