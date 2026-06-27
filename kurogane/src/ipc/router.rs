@@ -65,12 +65,6 @@ impl IpcRouter {
             }
         };
 
-        let id = envelope.correlation_id as i32;
-        if id <= 0 {
-            debug!("[Router Browser] invalid correlation_id {}", id);
-            return false;
-        }
-
         match envelope.subsystem {
             SUB_RPC => {
                 self.rpc.handle_browser(
