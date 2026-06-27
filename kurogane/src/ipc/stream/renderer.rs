@@ -8,6 +8,7 @@ use cef::*;
 use crate::debug;
 use crate::ipc::envelope::*;
 use crate::ipc::renderer_state::stream_callback_registry;
+use crate::ipc::utils::create_array_buffer_from_bytes;
 
 /// Handle a stream message arriving from the browser (renderer-side dispatch).
 pub fn handle_stream_renderer(_frame: &mut Frame, envelope: &Envelope, payload: &[u8]) -> bool {
@@ -119,19 +120,4 @@ fn on_error(envelope: &Envelope, payload: &[u8]) -> bool {
             true
         }
     }
-}
-
-fn create_array_buffer_from_bytes(payload: &[u8]) -> Option<V8Value> {
-    let mut store = v8_backing_store_create(payload.len())?;
-    if store.is_valid() == 0 {
-        return None;
-    }
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            payload.as_ptr(),
-            store.data() as *mut u8,
-            payload.len(),
-        );
-    }
-    v8_value_create_array_buffer_from_backing_store(Some(&mut store))
 }
