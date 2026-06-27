@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use cef::*;
 use crate::app::resolver::ResolvedFrontend;
-use crate::ipc::{IpcRouter, RpcSubsystem, BinarySubsystem, EventSubsystem, StreamSubsystem, StreamHandler, StreamResponder, IpcResponder, BinaryResponder, SyncRpcHandler, SyncBinaryHandler, AsyncRpcHandler, AsyncBinaryHandler, IpcContext};
+use crate::ipc::{IpcRouter, RequestResponseSubsystem, EventSubsystem, StreamSubsystem, StreamHandler, StreamResponder, IpcResponder, BinaryResponder, SyncHandler, AsyncHandler, IpcContext};
 use crate::runtime::{RuntimeBootstrap, Runtime};
 use crate::error::RuntimeError;
 use crate::spec::{RuntimeSpec, RuntimeMode};
@@ -153,15 +153,104 @@ pub trait ClientAppRendererDelegate: Send + Sync {
     }
 }
 
+/// Internal handler variant for unified command registration.
+pub enum Handler {
+    Sync(SyncHandler),
+    Async(AsyncHandler),
+}
+
+/// Converts a user-facing closure into an internal handler.
+pub trait IntoHandler {
+    fn into_handler(self) -> Handler;
+}
+
+pub struct SyncJson<F>(pub F);
+pub struct SyncBinary<F>(pub F);
+pub struct AsyncJson<F>(pub F);
+pub struct AsyncBinary<F>(pub F);
+
+impl<F> IntoHandler for SyncJson<F>
+where
+    F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
+{
+    fn into_handler(self) -> Handler {
+        let f = self.0;
+        Handler::Sync(Box::new(move |data: &[u8], _ctx: IpcContext| {
+            let s = std::str::from_utf8(data).map_err(|e| e.to_string())?;
+            let input: Value = if s.is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_str(s)
+                    .map_err(|e| format!("invalid JSON payload: {e}"))?
+            };
+            let output = f(input)?;
+            serde_json::to_string(&output)
+                .map_err(|e| format!("JSON serialization error: {e}"))
+                .map(|s| s.into_bytes())
+        }))
+    }
+}
+
+impl<F> IntoHandler for SyncBinary<F>
+where
+    F: Fn(&[u8]) -> Result<Vec<u8>, String> + Send + Sync + 'static,
+{
+    fn into_handler(self) -> Handler {
+        let f = self.0;
+        Handler::Sync(Box::new(move |data: &[u8], _ctx: IpcContext| f(data)))
+    }
+}
+
+impl<F> IntoHandler for AsyncJson<F>
+where
+    F: Fn(Value, IpcResponder) + Send + Sync + 'static,
+{
+    fn into_handler(self) -> Handler {
+        let f = self.0;
+        Handler::Async(Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| {
+            let s = std::str::from_utf8(data).unwrap_or("");
+            let value: Value = if s.is_empty() {
+                Value::Null
+            } else {
+                match serde_json::from_str(s) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        responder.resolve(Err(format!("invalid JSON: {e}")), 0);
+                        return;
+                    }
+                }
+            };
+            let r = IpcResponder::new(Box::new(move |result, code| {
+                responder.resolve(result.map(|s| s.into_bytes()), code);
+            }));
+            f(value, r)
+        }))
+    }
+}
+
+impl<F> IntoHandler for AsyncBinary<F>
+where
+    F: Fn(&[u8], BinaryResponder) + Send + Sync + 'static,
+{
+    fn into_handler(self) -> Handler {
+        let f = self.0;
+        Handler::Async(Box::new(move |data: &[u8], responder: BinaryResponder, _ctx: IpcContext| f(data, responder)))
+    }
+}
+
+/// Helper constructors for the handler wrapper types.
+pub fn sync_json<F>(f: F) -> SyncJson<F> { SyncJson(f) }
+pub fn sync_binary<F>(f: F) -> SyncBinary<F> { SyncBinary(f) }
+pub fn async_json<F>(f: F) -> AsyncJson<F> { AsyncJson(f) }
+pub fn async_binary<F>(f: F) -> AsyncBinary<F> { AsyncBinary(f) }
+
 /// Public application builder.
 ///
 /// Configures how the first browser instance starts.
 pub struct App {
     source: Source,
-    sync_commands: HashMap<String, SyncRpcHandler>,
-    sync_binary_commands: HashMap<String, SyncBinaryHandler>,
-    async_commands: HashMap<String, AsyncRpcHandler>,
-    async_binary_commands: HashMap<String, AsyncBinaryHandler>,
+    sync_handlers: HashMap<String, SyncHandler>,
+    async_handlers: HashMap<String, AsyncHandler>,
     stream_handlers: HashMap<String, StreamHandler>,
 
     profile_id: Option<String>,
@@ -187,10 +276,8 @@ impl App {
     fn with_source(source: Source) -> Self {
         Self {
             source,
-            sync_commands: HashMap::new(),
-            sync_binary_commands: HashMap::new(),
-            async_commands: HashMap::new(),
-            async_binary_commands: HashMap::new(),
+            sync_handlers: HashMap::new(),
+            async_handlers: HashMap::new(),
             stream_handlers: HashMap::new(),
 
             profile_id: None,
@@ -230,120 +317,26 @@ impl App {
         self
     }
 
-    /// Register a JSON command handler.
+    /// Registers a command handler.
     ///
-    /// Panics if name has already been registered.
-    pub fn command<F>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
-    {
+    /// Supports synchronous and asynchronous handlers for both JSON and binary
+    /// commands. The handler type determines how the command is registered.
+    ///
+    /// Panics if a command with the same name has already been registered.
+    pub fn command(mut self, name: impl Into<String>, handler: impl IntoHandler) -> Self {
         let name = name.into();
 
-        if self.sync_commands.contains_key(&name)
-            || self.sync_binary_commands.contains_key(&name)
-            || self.async_commands.contains_key(&name)
-            || self.async_binary_commands.contains_key(&name)
+        if self.sync_handlers.contains_key(&name)
+            || self.async_handlers.contains_key(&name)
             || self.stream_handlers.contains_key(&name)
         {
             panic!("command '{name}' registered twice");
         }
 
-        let wrapped: SyncRpcHandler = Box::new(move |payload: &str, _ctx: IpcContext| {
-            let input: Value = if payload.is_empty() {
-                Value::Null
-            } else {
-                serde_json::from_str(payload)
-                    .map_err(|e| format!("invalid JSON payload: {e}"))?
-            };
-
-            let output = handler(input)?;
-
-            serde_json::to_string(&output)
-                .map_err(|e| format!("JSON serialization error: {e}"))
-        });
-
-        self.sync_commands.insert(name, wrapped);
-        self
-    }
-
-    /// Register a binary command handler.
-    ///
-    /// Panics if name has already been registered.
-    pub fn binary_command<F>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Fn(&[u8]) -> Result<Vec<u8>, String> + Send + Sync + 'static,
-    {
-        let name = name.into();
-
-        if self.sync_commands.contains_key(&name)
-            || self.sync_binary_commands.contains_key(&name)
-            || self.async_commands.contains_key(&name)
-            || self.async_binary_commands.contains_key(&name)
-            || self.stream_handlers.contains_key(&name)
-        {
-            panic!("command '{name}' registered twice");
+        match handler.into_handler() {
+            Handler::Sync(h) => { self.sync_handlers.insert(name, h); }
+            Handler::Async(h) => { self.async_handlers.insert(name, h); }
         }
-
-        let wrapped: SyncBinaryHandler = Box::new(move |payload: &[u8], _ctx: IpcContext| {
-            handler(payload)
-        });
-        self.sync_binary_commands.insert(name, wrapped);
-        self
-    }
-
-    /// Register an async JSON command handler.
-    ///
-    /// The handler receives the parsed JSON value and an IpcResponder.
-    /// It should start async work and call responder.resolve() when done.
-    ///
-    /// Panics if name has already been registered.
-    pub fn async_command<F>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Fn(Value, IpcResponder) + Send + Sync + 'static,
-    {
-        let name = name.into();
-
-        if self.sync_commands.contains_key(&name)
-            || self.sync_binary_commands.contains_key(&name)
-            || self.async_commands.contains_key(&name)
-            || self.async_binary_commands.contains_key(&name)
-            || self.stream_handlers.contains_key(&name)
-        {
-            panic!("command '{name}' registered twice");
-        }
-
-        let wrapped: AsyncRpcHandler = Box::new(move |value: Value, responder: IpcResponder, _ctx: IpcContext| {
-            handler(value, responder)
-        });
-        self.async_commands.insert(name, wrapped);
-        self
-    }
-
-    /// Register an async binary command handler.
-    ///
-    /// The handler receives a byte slice and a BinaryResponder.
-    /// It should start async work and call responder.resolve() when done.
-    ///
-    /// Panics if name has already been registered.
-    pub fn async_binary_command<F>(mut self, name: impl Into<String>, handler: F) -> Self
-    where
-        F: Fn(&[u8], BinaryResponder) + Send + Sync + 'static,
-    {
-        let name = name.into();
-
-        if self.sync_commands.contains_key(&name)
-            || self.sync_binary_commands.contains_key(&name)
-            || self.async_commands.contains_key(&name)
-            || self.async_binary_commands.contains_key(&name)
-            || self.stream_handlers.contains_key(&name)
-        {
-            panic!("command '{name}' registered twice");
-        }
-
-        let wrapped: AsyncBinaryHandler = Box::new(move |payload: &[u8], responder: BinaryResponder, _ctx: IpcContext| {
-            handler(payload, responder)
-        });
-        self.async_binary_commands.insert(name, wrapped);
         self
     }
 
@@ -360,10 +353,8 @@ impl App {
     {
         let name = name.into();
 
-        if self.sync_commands.contains_key(&name)
-            || self.sync_binary_commands.contains_key(&name)
-            || self.async_commands.contains_key(&name)
-            || self.async_binary_commands.contains_key(&name)
+        if self.sync_handlers.contains_key(&name)
+            || self.async_handlers.contains_key(&name)
             || self.stream_handlers.contains_key(&name)
         {
             panic!("handler '{name}' registered twice");
@@ -413,10 +404,8 @@ impl App {
     pub fn start_embedded(self) -> Result<Runtime, RuntimeError> {
         let Self {
             source,
-            sync_commands,
-            sync_binary_commands,
-            async_commands,
-            async_binary_commands,
+            sync_handlers,
+            async_handlers,
             stream_handlers,
             profile_id,
             persist_session_cookies,
@@ -427,11 +416,10 @@ impl App {
             renderer_delegates,
         } = self;
 
-        let rpc = RpcSubsystem::new(sync_commands, async_commands);
-        let binary = BinarySubsystem::new(sync_binary_commands, async_binary_commands);
+        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
         let event = EventSubsystem::new();
         let stream = StreamSubsystem::new(stream_handlers);
-        let router = Arc::new(IpcRouter::new(rpc, binary, event, stream));
+        let router = Arc::new(IpcRouter::new(rpc, event, stream));
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
 
@@ -457,10 +445,8 @@ impl App {
     pub fn run(self) -> Result<(), RuntimeError> {
         let Self {
             source,
-            sync_commands,
-            sync_binary_commands,
-            async_commands,
-            async_binary_commands,
+            sync_handlers,
+            async_handlers,
             stream_handlers,
             profile_id,
             persist_session_cookies,
@@ -471,11 +457,10 @@ impl App {
             ..
         } = self;
 
-        let rpc = RpcSubsystem::new(sync_commands, async_commands);
-        let binary = BinarySubsystem::new(sync_binary_commands, async_binary_commands);
+        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
         let event = EventSubsystem::new();
         let stream = StreamSubsystem::new(stream_handlers);
-        let router = Arc::new(IpcRouter::new(rpc, binary, event, stream));
+        let router = Arc::new(IpcRouter::new(rpc, event, stream));
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
 
@@ -501,10 +486,8 @@ impl App {
     pub fn start(self) -> Result<Runtime, RuntimeError> {
         let Self {
             source,
-            sync_commands,
-            sync_binary_commands,
-            async_commands,
-            async_binary_commands,
+            sync_handlers,
+            async_handlers,
             stream_handlers,
             profile_id,
             persist_session_cookies,
@@ -515,11 +498,10 @@ impl App {
             renderer_delegates,
         } = self;
 
-        let rpc = RpcSubsystem::new(sync_commands, async_commands);
-        let binary = BinarySubsystem::new(sync_binary_commands, async_binary_commands);
+        let rpc = RequestResponseSubsystem::new(sync_handlers, async_handlers);
         let event = EventSubsystem::new();
         let stream = StreamSubsystem::new(stream_handlers);
-        let router = Arc::new(IpcRouter::new(rpc, binary, event, stream));
+        let router = Arc::new(IpcRouter::new(rpc, event, stream));
 
         let ResolvedFrontend { asset_root, start_url } = resolver::resolve(&source)?;
 
@@ -566,31 +548,31 @@ mod tests {
     #[should_panic(expected = "registered twice")]
     fn duplicate_json_command_panics() {
         App::new("./dist")
-            .command("ping", json_noop)
-            .command("ping", json_noop);
+            .command("ping", SyncJson(json_noop))
+            .command("ping", SyncJson(json_noop));
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn duplicate_binary_command_panics() {
         App::new("./dist")
-            .binary_command("upload", binary_noop)
-            .binary_command("upload", binary_noop);
+            .command("upload", SyncBinary(binary_noop))
+            .command("upload", SyncBinary(binary_noop));
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn json_and_binary_names_cannot_collide() {
         App::new("./dist")
-            .command("transfer", json_noop)
-            .binary_command("transfer", binary_noop);
+            .command("transfer", SyncJson(json_noop))
+            .command("transfer", SyncBinary(binary_noop));
     }
 
     #[test]
     #[should_panic(expected = "registered twice")]
     fn binary_and_json_names_cannot_collide() {
         App::new("./dist")
-            .binary_command("transfer", binary_noop)
-            .command("transfer", json_noop);
+            .command("transfer", SyncBinary(binary_noop))
+            .command("transfer", SyncJson(json_noop));
     }
 }

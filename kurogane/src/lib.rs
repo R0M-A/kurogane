@@ -36,5 +36,9 @@ pub use shutdown::ShutdownSignal;
 
 // Re-export IPC types for public use
 pub use crate::ipc::IpcResult;
-pub use app::{PumpRequest, PumpScheduler, ClientAppBrowserDelegate, ClientAppRendererDelegate};
+pub use app::{
+    PumpRequest, PumpScheduler, ClientAppBrowserDelegate, ClientAppRendererDelegate,
+    sync_json, sync_binary, async_json, async_binary, // convenience constructors
+    SyncJson, SyncBinary, AsyncJson, AsyncBinary,
+};
 pub use browser_info_map::{BrowserInfoMap, BrowserInfoMapVisitor, BrowserInfoMapVisitorResult};
