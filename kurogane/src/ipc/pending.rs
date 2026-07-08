@@ -77,3 +77,9 @@ impl PendingMap {
         visitor.count.load(Ordering::Relaxed)
     }
 }
+
+impl Default for PendingMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}

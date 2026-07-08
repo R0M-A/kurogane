@@ -731,10 +731,8 @@ wrap_v8_handler! {
                 if let Some(ret) = retval {
                     *ret = v8_value_create_bool(1);
                 }
-            } else {
-                if let Some(ret) = retval {
-                    *ret = v8_value_create_bool(0);
-                }
+            } else if let Some(ret) = retval {
+                *ret = v8_value_create_bool(0);
             }
 
             1

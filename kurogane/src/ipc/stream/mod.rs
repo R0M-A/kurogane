@@ -7,6 +7,7 @@
 //! giving handlers natural per-stream mutable state.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use cef::*;
 
 use crate::browser_registry::BrowserId;
@@ -115,13 +116,15 @@ pub type StreamFactory = Box<dyn Fn() -> Box<dyn StreamHandler> + Send + Sync>;
 pub mod browser;
 pub mod renderer;
 
+type StreamEntry = (BrowserId, Box<dyn StreamHandler>, Frame);
+
 /// Browser-side stream manager.
 pub struct StreamSubsystem {
     pub factories: HashMap<String, StreamFactory>,
     /// Per-stream handler instances, keyed by stream_id.
     /// Stores the frame alongside each handler so responders can be
     /// reconstructed on every callback instead of stored by the handler.
-    pub streams: std::sync::Mutex<HashMap<u32, (BrowserId, Box<dyn StreamHandler>, Frame)>>,
+    pub streams: Mutex<HashMap<u32, StreamEntry>>,
     pub pending: crate::ipc::pending::PendingMap,
 }
 
@@ -129,7 +132,7 @@ impl StreamSubsystem {
     pub fn new(factories: HashMap<String, StreamFactory>) -> Self {
         Self {
             factories,
-            streams: std::sync::Mutex::new(HashMap::new()),
+            streams: Mutex::new(HashMap::new()),
             pending: crate::ipc::pending::PendingMap::new(),
         }
     }

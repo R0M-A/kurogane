@@ -1,8 +1,10 @@
 use std::sync::Mutex;
 
+type Callback<T> = Box<dyn FnOnce(Result<T, String>, i32) + Send>;
+
 /// Single-use callback for async request/response IPC.
 pub struct Responder<T> {
-    callback: Mutex<Option<Box<dyn FnOnce(Result<T, String>, i32) + Send>>>,
+    callback: Mutex<Option<Callback<T>>>,
 }
 
 impl<T> Responder<T> {

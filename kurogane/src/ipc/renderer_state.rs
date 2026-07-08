@@ -196,7 +196,7 @@ impl PromiseRegistry {
     }
 
     pub fn take(&mut self, id: IpcId) -> Option<(V8Context, V8Value, u8)> {
-        self.pending.remove(&id).map(|(ctx, promise, sub)| (ctx, promise, sub))
+        self.pending.remove(&id)
     }
 
     pub fn clear_context(&mut self, ctx: &V8Context) {

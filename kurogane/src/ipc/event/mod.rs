@@ -48,3 +48,9 @@ impl EventSubsystem {
         total
     }
 }
+
+impl Default for EventSubsystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
