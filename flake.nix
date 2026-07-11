@@ -73,10 +73,10 @@
 
         cef = pkgs.stdenvNoCC.mkDerivation {
           pname = "cef-binary";
-          version = "147.0.10";
+          version = "150.0.10";
 
           src = pkgs.fetchurl {
-            url = "https://cef-builds.spotifycdn.com/cef_binary_147.0.10%2Bgd58e84d%2Bchromium-147.0.7727.118_linux64.tar.bz2";
+            url = "https://cef-builds.spotifycdn.com/cef_binary_150.0.10%2Bg8042e43%2Bchromium-150.0.7871.101_linux64.tar.bz2";
             sha256 = "sha256-FpDfe8eLVtgIyBdBmLzIsuEFT+Mjk5OrdVaDRnE4V64=";
           };
 
@@ -119,7 +119,7 @@
             inherit src cargoArtifacts;
 
             pname = "kurogane";
-            version = "0.1.0";
+            version = "0.4.0";
 
             cargoExtraArgs = "-p kurogane-cli";
 
