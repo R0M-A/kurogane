@@ -77,7 +77,7 @@
 
           src = pkgs.fetchurl {
             url = "https://cef-builds.spotifycdn.com/cef_binary_150.0.10%2Bg8042e43%2Bchromium-150.0.7871.101_linux64.tar.bz2";
-            sha256 = "sha256-FpDfe8eLVtgIyBdBmLzIsuEFT+Mjk5OrdVaDRnE4V64=";
+            hash = "sha256-ef/DVbfGbPebAmcwitTmjwBLajs1J5VkYHV3XQKgddQ=";
           };
 
           dontBuild = true;
