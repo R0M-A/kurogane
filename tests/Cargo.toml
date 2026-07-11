@@ -78,6 +78,6 @@ path = "window-management.rs"
 name = "delegates"
 path = "delegates.rs"
 
-[[bin]]
+[[example]]
 name = "stream-benchmark"
 path = "stream-benchmark.rs"
