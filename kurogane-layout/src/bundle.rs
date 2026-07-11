@@ -38,21 +38,19 @@ impl BundleLayout {
         self.root.join("runtime")
     }
 
+    #[cfg(target_os = "windows")]
     pub fn cef_dir(&self) -> PathBuf {
-        #[cfg(target_os = "windows")]
-        {
-            self.root.clone()
-        }
+        self.root.clone()
+    }
 
-        #[cfg(target_os = "linux")]
-        {
-            self.runtime_dir().join("cef")
-        }
+    #[cfg(target_os = "linux")]
+    pub fn cef_dir(&self) -> PathBuf {
+        self.runtime_dir().join("cef")
+    }
 
-        #[cfg(target_os = "macos")]
-        {
-            self.root.clone()
-        }
+    #[cfg(target_os = "macos")]
+    pub fn cef_dir(&self) -> PathBuf {
+        self.root.clone()
     }
 
     pub fn content_dir(&self) -> PathBuf {
@@ -63,21 +61,19 @@ impl BundleLayout {
         self.root.join(exe_name)
     }
 
+    #[cfg(target_os = "windows")]
     pub fn executable_path(&self, exe_name: &OsStr) -> PathBuf {
-        #[cfg(target_os = "windows")]
-        {
-            self.root.join(exe_name)
-        }
+        self.root.join(exe_name)
+    }
 
-        #[cfg(target_os = "linux")]
-        {
-            self.runtime_dir().join(exe_name)
-        }
+    #[cfg(target_os = "linux")]
+    pub fn executable_path(&self, exe_name: &OsStr) -> PathBuf {
+        self.runtime_dir().join(exe_name)
+    }
 
-        #[cfg(target_os = "macos")]
-        {
-            self.root.join(exe_name)
-        }
+    #[cfg(target_os = "macos")]
+    pub fn executable_path(&self, exe_name: &OsStr) -> PathBuf {
+        self.root.join(exe_name)
     }
 
     pub fn install_frontend(&self, src: &Path) -> Result<()> {
