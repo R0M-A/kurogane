@@ -1,179 +1,103 @@
 //! IPC message router
 //!
 //! Central dispatch layer for all IPC messages between browser and renderer.
+//! Owns the per-subsystem handler maps and routes incoming messages by subsystem.
 
 use cef::*;
-use std::sync::Arc;
-use crate::ipc::protocol::{get_kind, IpcMsgKind};
-use crate::ipc::browser_state::{IpcDispatcher, IpcContext};
-use crate::ipc::renderer_state::outgoing_shm;
-use crate::ipc::{rpc, binary};
+
+use crate::browser_registry::BrowserId;
 use crate::debug;
+use crate::ipc::browser_state::IpcContext;
+use crate::ipc::envelope::*;
+use crate::ipc::request_response::RequestResponseSubsystem;
+use crate::ipc::event::EventSubsystem;
+use crate::ipc::stream::StreamSubsystem;
 
-pub fn route_browser(
-    frame: &mut Frame,
-    args: &ListValue,
-    dispatcher: &Arc<IpcDispatcher>,
-    ctx: IpcContext,
-) -> bool {
-    let kind = match get_kind(args) {
-        Some(k) => k,
-        None => {
-            debug!("[IPC Router] invalid ipc message type");
-            return false;
+/// Top-level IPC router that owns all subsystems.
+pub struct IpcRouter {
+    pub request_response: RequestResponseSubsystem,
+    pub event: EventSubsystem,
+    pub stream: StreamSubsystem,
+}
+
+/// Standalone renderer-side dispatcher.
+///
+/// Routes a decoded envelope + payload to the appropriate subsystem handler.
+/// Does NOT require an IpcRouter instance, so it works in both browser and renderer processes.
+pub fn route_renderer(frame: &mut Frame, envelope: &Envelope, payload: &[u8]) -> bool {
+    match envelope.subsystem {
+        SUB_RPC => crate::ipc::rpc::renderer::handle_rpc_renderer(frame, envelope, payload),
+        SUB_BINARY => crate::ipc::binary::renderer::handle_binary_renderer(frame, envelope, payload),
+        SUB_EVENT => crate::ipc::event::renderer::handle_event_renderer(frame, envelope, payload),
+        SUB_STREAM => crate::ipc::stream::renderer::handle_stream_renderer(frame, envelope, payload),
+        _ => {
+            debug!("[Router Renderer] unknown subsystem {}", envelope.subsystem);
+            false
         }
-    };
-    let id = list_get_int(args, 1);
-    if id <= 0 {
-        debug!("[IPC Router] invalid id {}", id);
-        return false;
+    }
+}
+
+impl IpcRouter {
+    pub fn new(request_response: RequestResponseSubsystem, event: EventSubsystem, stream: StreamSubsystem) -> Self {
+        Self { request_response, event, stream }
     }
 
-    debug!("[IPC Browser] message type={:?} id={}", kind, id);
-
-    match kind {
-        // JSON invoke
-        IpcMsgKind::Invoke => {
-            let command = list_get_string(args, 2);
-            let payload = list_get_string(args, 3);
-
-            rpc::handle_invoke(frame, id, command, payload, dispatcher, ctx);
-        }
-
-        // Binary invoke
-        IpcMsgKind::BinaryInvoke => {
-            let command = list_get_string(args, 2);
-
-            // CEF exposes binary via an internal buffer; copy into Vec<u8> to own the data
-            if let Some(bin) = args.binary(3) {
-                let mut buf = vec![0u8; bin.size()];
-                let written = bin.data(Some(&mut buf), 0);
-                buf.truncate(written);
-
-                debug!("[IPC Browser] inline binary: {} bytes", written);
-
-                binary::handle_invoke(frame, id, command, &buf, dispatcher, ctx);
-                return true;
+    /// Route a message received from the renderer (browser-side dispatch).
+    pub fn route_browser(
+        &self,
+        frame: &mut Frame,
+        envelope: &Envelope,
+        payload: &[u8],
+        ctx: IpcContext,
+    ) -> bool {
+        match envelope.subsystem {
+            SUB_RPC | SUB_BINARY => {
+                self.request_response.handle_browser(
+                    frame,
+                    envelope,
+                    payload,
+                    ctx,
+                    self.request_response.pending.clone(),
+                )
             }
-
-            // Large payload via SHM; open before the renderer drops it
-            // Handle SHM buffer reading for large payloads
-            let result: Result<(), String> = (|| {
-                let name = list_get_string(args, 3);
-                let raw_size = list_get_int(args, 4);
-
-                if raw_size <= 0 {
-                    return Err(format!("invalid SHM size: {}", raw_size));
-                }
-
-                let size = raw_size as usize;
-
-                if size > crate::ipc::transport::shm::MAX_SHM_SIZE {
-                    return Err(format!(
-                        "SHM exceeds limit: {} > {}",
-                        size,
-                        crate::ipc::transport::shm::MAX_SHM_SIZE
-                    ));
-                }
-
-                let shm = crate::ipc::transport::shm::SharedBuffer::open(&name, size)?;
-
-                shm.with_read(|data| {
-                    debug!(
-                        "[IPC Browser] binary invoke (SHM): '{}' (id={}, {} bytes)",
-                        command, id, data.len()
-                    );
-
-                    binary::handle_invoke(frame, id, command, data, dispatcher, ctx);
-                })?;
-
-                Ok(())
-            })();
-
-            if let Err(e) = result {
-                debug!("[IPC Browser] SHM failure: {}", e);
-                binary::send_error(frame, id, e);
+            SUB_EVENT => {
+                self.event.handle_browser(frame, envelope, payload, ctx)
             }
-
-            return true;
+            SUB_STREAM => {
+                self.stream.handle_browser(
+                    frame,
+                    envelope,
+                    payload,
+                    ctx,
+                    self.stream.pending.clone(),
+                )
+            }
+            _ => {
+                debug!(
+                    "[Router Browser] unknown subsystem {}",
+                    envelope.subsystem
+                );
+                false
+            }
         }
-
-        // SHM_FREE: renderer has finished reading a large binary response
-        IpcMsgKind::ShmFree => {
-            debug!("[IPC Browser] SHM_FREE for id={}", id);
-            binary::handle_shm_free(id);
-        }
-
-        _ => return false,
     }
 
-    true
-}
-
-pub fn route_renderer(
-    frame: &mut Frame,
-    args: &ListValue,
-) -> bool {
-    let kind = match get_kind(args) {
-        Some(k) => k,
-        None => {
-            debug!("[IPC Router] invalid ipc message type");
-            return false;
-        }
-    };
-    let id = list_get_int(args, 1);
-    if id <= 0 {
-        debug!("[IPC Router] invalid id {}", id);
-        return false;
+    /// Route a message received from the browser (renderer-side dispatch).
+    pub fn route_renderer(&self, frame: &mut Frame, envelope: &Envelope, payload: &[u8]) -> bool {
+        route_renderer(frame, envelope, payload)
     }
 
-    match kind {
-        IpcMsgKind::Resolve => {
-            // Release outgoing SHM; browser has read it and responded
-            outgoing_shm().lock().unwrap().remove(&id);
-            let payload = list_cef_string(args, 2);
-            rpc::resolve_cef_string(id, true, &payload);
+    /// Cancel all pending async handlers for a given browser.
+    pub fn cancel_all_for_browser(&self, browser_id: BrowserId) -> usize {
+        let req_count = self.request_response.pending.cancel_all_for_browser(browser_id);
+        let stream_count = self.stream.pending.cancel_all_for_browser(browser_id);
+        // Clean up event subscriptions and stream state
+        self.event.clear_for_browser(browser_id);
+        self.stream.clear_for_browser(browser_id);
+        let total = req_count + stream_count;
+        if total > 0 {
+            debug!("[Router] canceled {} pending handlers for browser", total);
         }
-
-        IpcMsgKind::Reject => {
-            // Release outgoing SHM; browser has read it and responded
-            outgoing_shm().lock().unwrap().remove(&id);
-            let payload = list_cef_string(args, 2);
-            rpc::resolve_cef_string(id, false, &payload);
-        }
-
-        IpcMsgKind::BinaryResponse => {
-            binary::handle_response(frame, id, args);
-        }
-
-        _ => return false,
+        total
     }
-
-    true
-}
-
-//
-// Message helpers
-//
-
-fn list_get_int(args: &ListValue, idx: usize) -> i32 {
-    // binding exposes .int(index)
-    args.int(idx)
-}
-
-fn list_get_string(args: &ListValue, idx: usize) -> String {
-    // binding exposes .string(index) -> CefStringUserfree
-    let userfree = args.string(idx);
-    // Convert to CefString (borrow conversion) then to Rust String
-    let cef: CefString = (&userfree).into();
-    cef.to_string()
-}
-
-//
-// Helpers
-//
-
-#[inline(always)]
-fn list_cef_string(args: &ListValue, idx: usize) -> CefString {
-    (&args.string(idx)).into()
 }

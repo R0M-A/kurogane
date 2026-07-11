@@ -4,19 +4,19 @@ use serde_json::{Value, json};
 fn main() {
     App::new("ipc")
         // Echo: returns exactly what was sent
-        .command("echo", |payload: Value| {
+        .command("echo", |payload: Value, _: &kurogane::AppHandle| {
             println!("[echo] {:?}", payload);
             Ok(payload)
         })
         // Greeting: expects a string, returns a string
-        .command("greet", |payload: Value| {
+        .command("greet", |payload: Value, _: &kurogane::AppHandle| {
             let name = payload.as_str().unwrap_or("anonymous");
             println!("[greet] {}", name);
 
             Ok(json!(format!("Hello, {}!", name)))
         })
         // Divide: expects { a: number, b: number }
-        .command("divide", |payload: Value| {
+        .command("divide", |payload: Value, _: &kurogane::AppHandle| {
             println!("[divide] {:?}", payload);
 
             let a = payload["a"].as_f64().ok_or("Missing or invalid 'a'")?;
@@ -30,7 +30,7 @@ fn main() {
             Ok(json!(a / b))
         })
         // File system mock
-        .command("fs.read", |payload: Value| {
+        .command("fs.read", |payload: Value, _: &kurogane::AppHandle| {
             let file = payload.as_str().unwrap_or("");
             println!("[fs.read] {}", file);
 
@@ -44,7 +44,7 @@ fn main() {
             }
         })
         // Slow operation: demonstrates blocking behavior
-        .command("slow_operation", |payload: Value| {
+        .command("slow_operation", |payload: Value, _: &kurogane::AppHandle| {
             println!("[slow_operation] starting...");
 
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -55,7 +55,7 @@ fn main() {
             }))
         })
         // Type inspector: proves structured JSON transport
-        .command("types", |payload: Value| {
+        .command("types", |payload: Value, _: &kurogane::AppHandle| {
             Ok(json!({
                 "is_object": payload.is_object(),
                 "is_array": payload.is_array(),
@@ -65,6 +65,6 @@ fn main() {
                 "is_null": payload.is_null(),
             }))
         })
-        .binary_command("echo_binary", |data: &[u8]| Ok(data.to_vec()))
+        .binary_command("echo_binary", |data: &[u8], _: &kurogane::AppHandle| Ok(data.to_vec()))
         .run_or_exit();
 }

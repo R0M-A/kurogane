@@ -75,7 +75,7 @@ fn main() {
     let runtime = App::url("https://example.com")
         .delegate(BrowserDelegate)
         .renderer_delegate(RendererDelegate)
-        .command("ping", |payload| {
+        .command("ping", |payload: serde_json::Value, _: &kurogane::AppHandle| {
             Ok(serde_json::json!({
                 "ok": true,
                 "echo": payload

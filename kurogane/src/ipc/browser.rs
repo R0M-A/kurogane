@@ -3,31 +3,43 @@
 //! Boundary between CEF's message system and the IPC infrastructure.
 
 use std::sync::Arc;
+
 use cef::*;
-use crate::debug;
-use crate::ipc::browser_state::{IpcDispatcher, IpcContext};
+
 use crate::browser_registry::BrowserId;
+use crate::debug;
+use crate::ipc::browser_state::IpcContext;
+use crate::ipc::transport::message::extract_message;
+use crate::ipc::router::IpcRouter;
 
 pub fn handle_ipc_message(
     _browser: &mut Browser,
     frame: &mut Frame,
-    message: &mut ProcessMessage,
-    dispatcher: &Arc<IpcDispatcher>,
+    message: &ProcessMessage,
+    router: &Arc<IpcRouter>,
     browser_id: Option<BrowserId>,
 ) -> bool {
     let name: CefString = (&message.name()).into();
-    if name.to_string() != "ipc" {
+    let name = name.to_string();
+
+    if !name.starts_with("kurogane_") {
         return false;
     }
 
-    let Some(args) = message.argument_list() else {
-        debug!("[IPC Browser] missing argument list");
-        return false;
+    let received = match extract_message(message) {
+        Some(m) => m,
+        None => {
+            debug!("[IPC Browser] failed to extract message");
+            return false;
+        }
     };
+
+    let (envelope, payload) = received.as_envelope_payload();
 
     let ctx = IpcContext {
         browser_id,
         frame_id: None,
     };
-    crate::ipc::router::route_browser(frame, &args, dispatcher, ctx)
+
+    router.route_browser(frame, &envelope, payload, ctx)
 }

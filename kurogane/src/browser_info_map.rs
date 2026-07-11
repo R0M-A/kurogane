@@ -17,9 +17,14 @@ pub trait BrowserInfoMapVisitor<K: Copy + Ord, V: Clone> {
     ) -> ControlFlow<BrowserInfoMapVisitorResult, BrowserInfoMapVisitorResult>;
 }
 
-#[derive(Default)]
 pub struct BrowserInfoMap<K: Clone + Ord, V: Clone> {
     map: BTreeMap<BrowserId, BTreeMap<K, V>>,
+}
+
+impl<K: Clone + Ord, V: Clone> Default for BrowserInfoMap<K, V> {
+    fn default() -> Self {
+        Self { map: BTreeMap::new() }
+    }
 }
 
 impl<K: Copy + Ord, V: Clone> BrowserInfoMap<K, V> {
@@ -132,6 +137,16 @@ impl<K: Copy + Ord, V: Clone> BrowserInfoMap<K, V> {
         if info_map.is_empty() {
             self.map.remove(&browser_id);
         }
+    }
+
+    /// Remove a specific (browser_id, key) entry. Returns the removed value if found.
+    pub fn remove(&mut self, browser_id: BrowserId, key: K) -> Option<V> {
+        let info_map = self.map.get_mut(&browser_id)?;
+        let value = info_map.remove(&key);
+        if info_map.is_empty() {
+            self.map.remove(&browser_id);
+        }
+        value
     }
 
     pub fn is_empty(&self) -> bool {
