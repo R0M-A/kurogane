@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::ffi::OsString;
 use std::process::Command;
-use kurogane_layout::cef_install_dir;
+use kurogane_layout::{cef_install_dir, validate_cef_root};
 
 use crate::tui;
 
@@ -16,13 +16,19 @@ pub fn run(cargo_args: Vec<OsString>) -> Result<()> {
 
     tui::step("Checking Chromium engine");
 
-    if !cef.exists() {
-        tui::warn("Chromium engine not found");
-        tui::info("Initiating install process");
-        crate::install::run()?;
-    } else {
-        tui::success("Chromium engine ready");
-        tui::field("path", tui::format_path(&cef));
+    match validate_cef_root(&cef) {
+        Ok(_) => {
+            tui::success("Chromium engine ready");
+            tui::field("path", tui::format_path(&cef));
+        }
+
+        Err(err) => {
+            tui::warn("Chromium runtime missing or invalid");
+            tui::info("Initiating install process...");
+            tui::field("reason", err);
+
+            crate::install::run()?;
+        }
     }
 
     // Pass env to build step
