@@ -63,9 +63,6 @@ pub const PAYLOAD_STRING: u8 = 1;
 pub const PAYLOAD_BINARY: u8 = 2;
 pub const PAYLOAD_JSON: u8 = 3;
 
-/// Envelope flag bits.
-pub const FLAG_PERSISTENT: u8 = 0b0000_0001;
-
 /// Encodes an envelope into its serialized wire representation.
 #[inline]
 pub fn encode_envelope_bytes(envelope: &Envelope) -> [u8; ENVELOPE_SIZE] {

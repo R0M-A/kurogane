@@ -45,7 +45,6 @@ impl EventSubsystem {
             }
         };
 
-        let persistent = (envelope.flags & FLAG_PERSISTENT) != 0;
         let browser_id = match ctx.browser_id {
             Some(id) => id,
             None => {
@@ -61,14 +60,12 @@ impl EventSubsystem {
                 id: envelope.correlation_id,
                 frame: frame.clone(),
                 browser_id,
-                persistent,
             });
 
         debug!(
-            "[Event Browser] subscribed '{}' browser={} persistent={}",
+            "[Event Browser] subscribed '{}' browser={}",
             event_name,
-            browser_id.as_u32(),
-            persistent
+            browser_id.as_u32()
         );
         true
     }

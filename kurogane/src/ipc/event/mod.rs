@@ -15,7 +15,6 @@ pub struct EventSubscription {
     pub id: u32,
     pub frame: Frame,
     pub browser_id: BrowserId,
-    pub persistent: bool,
 }
 
 pub mod browser;
