@@ -8,9 +8,6 @@
 //! reconstructed on every callback, eliminating the need for handlers to
 //! store an Option<StreamResponder> themselves.
 
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-
 use cef::*;
 
 use crate::debug;
@@ -53,36 +50,34 @@ impl StreamSubsystem {
         payload: &[u8],
         ctx: IpcContext,
     ) -> bool {
+        let stream_id = envelope.correlation_id;
+
         let (handler_name, metadata_bytes) = match decode_cmd_payload(payload) {
             Some(v) => v,
             None => {
                 debug!("[Stream Browser] invalid open payload");
+                let responder = StreamResponder::new(frame.clone(), stream_id);
+                let _ = responder.error("invalid open payload");
                 return false;
             }
         };
 
-        let stream_id = envelope.correlation_id;
         let browser_id = match ctx.browser_id {
             Some(id) => id,
             None => {
                 debug!("[Stream Browser] open without browser_id");
+                let responder = StreamResponder::new(frame.clone(), stream_id);
+                let _ = responder.error("no browser_id");
                 return false;
             }
         };
-
-        // Register pending entry so the stream can be cancelled on browser destroy
-        pending_clone.insert(
-            browser_id,
-            stream_id as i32,
-            PendingEntry {
-                aborted: Arc::new(AtomicBool::new(false)),
-            },
-        );
 
         let factory = match self.factories.get(handler_name) {
             Some(f) => f,
             None => {
                 debug!("[Stream Browser] no factory '{}' for stream open", handler_name);
+                let responder = StreamResponder::new(frame.clone(), stream_id);
+                let _ = responder.error(&format!("no handler registered for '{handler_name}'"));
                 return false;
             }
         };
@@ -95,6 +90,7 @@ impl StreamSubsystem {
         let metadata_str = std::str::from_utf8(metadata_bytes).unwrap_or("");
         if let Err(e) = handler.on_open(metadata_str, &responder) {
             debug!("[Stream Browser] on_open error: {}", e);
+            let _ = responder.error(&e);
             return false;
         }
 
@@ -115,24 +111,23 @@ impl StreamSubsystem {
     fn on_data(&self, envelope: &Envelope, payload: &[u8]) -> bool {
         let stream_id = envelope.correlation_id;
 
-        let mut streams = self.streams.lock().unwrap();
-        let (_, handler, frame) = match streams.get_mut(&stream_id) {
-            Some(entry) => entry,
-            None => {
-                debug!("[Stream Browser] data for unknown stream {}", stream_id);
-                return false;
-            }
+        let entry = self.streams.lock().unwrap().remove(&stream_id);
+        let Some((browser_id, mut handler, frame)) = entry else {
+            debug!("[Stream Browser] data for unknown stream {}", stream_id);
+            return false;
         };
 
         // Reconstruct responder from the stored frame, the handler never
         // needs to store one itself.
         let responder = StreamResponder::new(frame.clone(), stream_id);
-        if let Err(e) = handler.on_chunk(payload, &responder) {
-            debug!("[Stream Browser] on_chunk error: {}", e);
-            // Propagate error back to renderer
-            let _ = responder.error(&e);
-            drop(streams);
-            self.streams.lock().unwrap().remove(&stream_id);
+        match handler.on_chunk(payload, &responder) {
+            Ok(()) => {
+                self.streams.lock().unwrap().insert(stream_id, (browser_id, handler, frame));
+            }
+            Err(e) => {
+                debug!("[Stream Browser] on_chunk error: {}", e);
+                let _ = responder.error(&e);
+            }
         }
 
         true

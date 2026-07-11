@@ -7,7 +7,8 @@ use cef::*;
 
 use crate::debug;
 use crate::ipc::envelope::*;
-use crate::ipc::renderer_state::stream_callback_registry;
+use crate::ipc::renderer_state::{registry, stream_callback_registry};
+use crate::ipc::browser_state::IpcError;
 use crate::ipc::utils::create_array_buffer_from_bytes;
 
 /// Handle a stream message arriving from the browser (renderer-side dispatch).
@@ -93,6 +94,21 @@ fn on_end(envelope: &Envelope, payload: &[u8]) -> bool {
 fn on_error(envelope: &Envelope, payload: &[u8]) -> bool {
     let stream_id = envelope.correlation_id as i32;
 
+    let err_str = String::from_utf8_lossy(payload);
+
+    // Check if there's a pending open() promise for this id -> open failed
+    let entry = registry().lock().unwrap().take(stream_id);
+    if let Some((context, promise, _)) = entry {
+        if context.enter() == 0 {
+            return false;
+        }
+        let msg = CefString::from(IpcError::new(err_str.as_ref(), -1).to_string().as_str());
+        promise.reject_promise(Some(&msg));
+        context.exit();
+        return true;
+    }
+
+    // Otherwise it's a mid-stream error -> existing onError callback path
     let entry = {
         let mut registry = stream_callback_registry().lock().unwrap();
         let cb = registry.take_error(stream_id);
@@ -111,7 +127,6 @@ fn on_error(envelope: &Envelope, payload: &[u8]) -> bool {
                 return true;
             }
 
-            let err_str = String::from_utf8_lossy(payload);
             let payload_v8 = v8_value_create_string(Some(&CefString::from(err_str.as_ref()))).unwrap();
             let args: [Option<V8Value>; 1] = [Some(payload_v8)];
             callback.execute_function(None, Some(&args));

@@ -980,28 +980,17 @@ wrap_v8_handler! {
             let payload = encode_cmd_payload(&handler_name, metadata.as_bytes());
             if let Some(mut msg) = build_message("kurogane_stream", &envelope, &payload) {
                 frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
-            } else {
-                if context.enter() == 0 {
-                    registry().lock().unwrap().take(stream_id);
-                    return 0;
-                }
-                let reject_msg = CefString::from("-1: Failed to build IPC message");
-                promise.reject_promise(Some(&reject_msg));
-                context.exit();
-                registry().lock().unwrap().take(stream_id);
-                if let Some(ret) = retval {
-                    *ret = Some(promise);
-                }
-                return 1;
             }
 
-            // Resolve promise immediately with the stream id
+            // Resolve with the stream ID after sending STREAM_OPEN.
+            // This ensures the browser has registered the stream before any
+            // subsequent data, end or error events are dispatched.
             if context.enter() == 0 {
                 registry().lock().unwrap().take(stream_id);
                 return 0;
             }
-            let mut stream_id_v8 = v8_value_create_uint(stream_id as u32).unwrap();
-            promise.resolve_promise(Some(&mut stream_id_v8));
+            let mut stream_v8 = v8_value_create_uint(stream_id as u32).unwrap();
+            promise.resolve_promise(Some(&mut stream_v8));
             context.exit();
             registry().lock().unwrap().take(stream_id);
 
