@@ -29,5 +29,5 @@ impl std::fmt::Display for IpcError {
 /// Contextual information for an IPC dispatch call.
 pub struct IpcContext {
     pub browser_id: Option<BrowserId>,
-    pub frame_id: Option<i64>,
+    pub frame_id: Option<String>,
 }

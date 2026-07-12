@@ -38,7 +38,10 @@ pub fn handle_ipc_message(
 
     let ctx = IpcContext {
         browser_id,
-        frame_id: None,
+        frame_id: Some({
+            let id: CefStringUtf16 = (&frame.identifier()).into();
+            id.to_string()
+        }),
     };
 
     router.route_browser(frame, &envelope, payload, ctx)
