@@ -160,7 +160,7 @@ binarySmall(){
 timed("binary small", async()=>{
     const data = new Uint8Array([1,2,3,4,5]);
 
-    const out = await kurogane.invokeBinary("echo_binary", data);
+    const out = await kurogane.invoke("echo_binary", data);
 
     return Array.from(new Uint8Array(out));
 });
@@ -172,7 +172,7 @@ timed("binary large (2MB)", async()=>{
     const data = new Uint8Array(2_000_000);
     data.fill(7);
 
-    const out = await kurogane.invokeBinary("echo_binary", data);
+    const out = await kurogane.invoke("echo_binary", data);
 
     return {
         input:data.length,
@@ -190,7 +190,7 @@ timed("binary integrity", async()=>{
         data[i]=i%255;
 
     const out = new Uint8Array(
-        await kurogane.invokeBinary("echo_binary", data)
+        await kurogane.invoke("echo_binary", data)
     );
 
     for(let i=0;i<data.length;i++){
@@ -212,7 +212,7 @@ timed("binary stress 50", async()=>{
         const data = new Uint8Array(50000);
         data.fill(i);
 
-        arr.push(kurogane.invokeBinary("echo_binary",data));
+        arr.push(kurogane.invoke("echo_binary",data));
     }
 
     await Promise.all(arr).then(res=>{
@@ -236,7 +236,7 @@ timed("binary threshold test", async()=>{
         data[i]=i%255;
 
     const out = new Uint8Array(
-        await kurogane.invokeBinary("echo_binary", data)
+        await kurogane.invoke("echo_binary", data)
     );
 
     return {
@@ -252,7 +252,7 @@ timed("binary huge (10MB)", async()=>{
     const data = new Uint8Array(10_000_000);
     data.fill(3);
 
-    const out = await kurogane.invokeBinary("echo_binary", data);
+    const out = await kurogane.invoke("echo_binary", data);
 
     return {
         input:data.length,

@@ -98,13 +98,13 @@ impl RequestResponseSubsystem {
                 let aborted = aborted.clone();
                 let frame = frame.clone();
                 let pending = pending_clone.clone();
-                let subsystem = envelope.subsystem;
+                let payload_kind = envelope.payload_kind;
                 move |result, error_code| {
                     if let Some(bid) = browser_id {
                         pending.remove(bid, id);
                     }
                     if !aborted.load(std::sync::atomic::Ordering::SeqCst) {
-                        send_response(&frame, subsystem, correlation_id, result, error_code);
+                        send_response(&frame, payload_kind, correlation_id, result, error_code);
                     } else {
                         debug!("[RequestResponse Browser] dropping response for canceled id={}", id);
                     }
@@ -123,7 +123,7 @@ impl RequestResponseSubsystem {
                 Err(_) => (Err("handler panicked".to_string()), -1),
             };
 
-            send_response(frame, envelope.subsystem, correlation_id, response, code);
+            send_response(frame, envelope.payload_kind, correlation_id, response, code);
         }
 
         true
@@ -151,17 +151,13 @@ impl RequestResponseSubsystem {
     }
 }
 
-fn send_response(frame: &Frame, subsystem: u8, correlation_id: u32, result: Result<Vec<u8>, String>, error_code: i32) {
+fn send_response(frame: &Frame, payload_kind: u8, correlation_id: u32, result: Result<Vec<u8>, String>, error_code: i32) {
     if frame.is_valid() == 0 {
         debug!("[RequestResponse Browser] frame destroyed, dropping id={}", correlation_id);
         return;
     }
 
-    let (opcode_ok, opcode_err, payload_kind) = match subsystem {
-        SUB_RPC => (RPC_RESOLVE, RPC_REJECT, PAYLOAD_STRING),
-        SUB_BINARY => (BINARY_RESPONSE, BINARY_REJECT, PAYLOAD_BINARY),
-        _ => return,
-    };
+    let (opcode_ok, opcode_err) = (RPC_RESOLVE, RPC_REJECT);
 
     let (opcode, data) = match result {
         Ok(bytes) => (opcode_ok, bytes),
@@ -175,7 +171,7 @@ fn send_response(frame: &Frame, subsystem: u8, correlation_id: u32, result: Resu
 
     let envelope = Envelope {
         version: ENVELOPE_VERSION,
-        subsystem,
+        subsystem: SUB_RPC,
         opcode,
         flags: 0,
         correlation_id,

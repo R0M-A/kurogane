@@ -4,6 +4,7 @@ use crate::debug;
 use crate::ipc::browser_state::IpcError;
 use crate::ipc::envelope::*;
 use crate::ipc::renderer_state::registry;
+use crate::ipc::utils::create_array_buffer_from_bytes;
 
 /// Handle an RPC response arriving from the browser (renderer-side dispatch).
 pub fn handle_rpc_renderer(_frame: &mut Frame, envelope: &Envelope, payload: &[u8]) -> bool {
@@ -19,9 +20,36 @@ pub fn handle_rpc_renderer(_frame: &mut Frame, envelope: &Envelope, payload: &[u
 
 fn on_resolve(envelope: &Envelope, payload: &[u8]) -> bool {
     let id = envelope.correlation_id as i32;
-    let payload_str = String::from_utf8_lossy(payload);
-    resolve_cef_string(id, true, &CefString::from(payload_str.as_ref()), 0);
+    match envelope.payload_kind {
+        PAYLOAD_BINARY => resolve_binary(id, payload),
+        _ => {
+            let payload_str = String::from_utf8_lossy(payload);
+            resolve_cef_string(id, true, &CefString::from(payload_str.as_ref()), 0);
+        }
+    }
     true
+}
+
+fn resolve_binary(id: i32, payload: &[u8]) {
+    let entry = { registry().lock().unwrap().take(id) };
+    let Some((context, promise, _)) = entry else {
+        eprintln!(
+            "[IPC WARNING] binary response for unknown promise id={} (likely page reload)",
+            id
+        );
+        return;
+    };
+    if context.enter() == 0 {
+        eprintln!("[IPC] failed to enter V8 context for binary promise id={}", id);
+        return;
+    }
+    if let Some(mut buf) = create_array_buffer_from_bytes(payload) {
+        promise.resolve_promise(Some(&mut buf));
+    } else {
+        let reject_msg = CefString::from("-2: Failed to create ArrayBuffer");
+        promise.reject_promise(Some(&reject_msg));
+    }
+    context.exit();
 }
 
 fn on_reject(envelope: &Envelope, payload: &[u8]) -> bool {

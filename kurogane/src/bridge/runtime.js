@@ -23,15 +23,28 @@
     }
 
     /**
-     * Invoke a named JSON command.
+     * Invoke a named command.
      *
-     * Payload is serialized to JSON before sending and the response is deserialized.
+     * Accepts ArrayBuffer, ArrayBufferView, or any JSON-serializable value.
+     * For ArrayBuffer/ArrayBufferView payloads, the raw bytes are sent and the
+     * response is returned as an ArrayBuffer. For JSON payloads, the value is
+     * serialized before sending and the response is deserialized.
      *
      * @param {string} command
-     * @param {*} payload - any JSON-serializable value
-     * @returns {Promise<*>}
+     * @param {ArrayBuffer | ArrayBufferView | *} payload
+     * @returns {Promise<ArrayBuffer | *>}
      */
     async function invoke(command, payload) {
+        if (payload instanceof ArrayBuffer) {
+            return window.core.invoke(command, payload).catch(toError);
+        }
+        if (ArrayBuffer.isView(payload)) {
+            const buffer = payload.buffer.slice(
+                payload.byteOffset,
+                payload.byteOffset + payload.byteLength,
+            );
+            return window.core.invoke(command, buffer).catch(toError);
+        }
         const json = payload !== undefined ? JSON.stringify(payload) : '';
         let result;
 
@@ -49,37 +62,9 @@
     }
 
     /**
-     * Invoke a named binary command.
-     *
-     * Accepts ArrayBuffer or any ArrayBufferView (Uint8Array, Float32Array, DataView, etc.)
-     * The native side only understands plain ArrayBuffers so this wrapper
-     * automatically converts or slices the input to a proper ArrayBuffer.
-     *
-     * @param {string} command
-     * @param {ArrayBuffer | ArrayBufferView} data
-     * @returns {Promise<ArrayBuffer>}
-     */
-    function invokeBinary(command, data) {
-        let buffer;
-
-        if (data instanceof ArrayBuffer) {
-            buffer = data;
-        } else if (ArrayBuffer.isView(data)) {
-            buffer = data.buffer.slice(
-                data.byteOffset,
-                data.byteOffset + data.byteLength,
-            );
-        } else {
-            return Promise.reject(new TypeError(`invokeBinary: expected ArrayBuffer or ArrayBufferView, got ${data === null ? 'null' : typeof data}`));
-        }
-
-        return window.core.invokeBinary(command, buffer).catch(toError);
-    }
-
-    /**
      * Cancel a pending IPC request by its promise id.
      *
-     * @param {number} id - The promise id returned by invoke/invokeBinary
+     * @param {number} id - The promise id returned by invoke
      * @returns {boolean} true if the promise was found and canceled
      */
     function cancel(id) {
@@ -242,7 +227,6 @@
 
     window.kurogane = Object.freeze({
         invoke,
-        invokeBinary,
         cancel,
         on,
         off,

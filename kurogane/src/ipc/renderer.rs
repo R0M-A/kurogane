@@ -117,7 +117,7 @@ wrap_render_process_handler! {
             let global = context.global().unwrap();
             let mut core = v8_value_create_object(None, None).unwrap();
 
-            // JSON invoke
+            // Invoke handler (accepts string or ArrayBuffer payload)
             let mut handler = IpcInvokeHandler::new();
             let mut invoke = v8_value_create_function(
                 Some(&CefString::from("invoke")),
@@ -127,19 +127,6 @@ wrap_render_process_handler! {
             core.set_value_bykey(
                 Some(&CefString::from("invoke")),
                 Some(&mut invoke),
-                V8Propertyattribute::default(),
-            );
-
-            // Binary invoke
-            let mut bin_handler = IpcInvokeBinaryHandler::new();
-            let mut invoke_binary = v8_value_create_function(
-                Some(&CefString::from("invokeBinary")),
-                Some(&mut bin_handler),
-            ).unwrap();
-
-            core.set_value_bykey(
-                Some(&CefString::from("invokeBinary")),
-                Some(&mut invoke_binary),
                 V8Propertyattribute::default(),
             );
 
@@ -421,7 +408,7 @@ wrap_render_process_handler! {
 }
 
 //
-// JSON invoke handler
+// Invoke handler (accepts string or ArrayBuffer payload)
 //
 
 wrap_v8_handler! {
@@ -463,14 +450,6 @@ wrap_v8_handler! {
                 }
             };
 
-            // optional payload (string)
-            let payload = match args.get(1) {
-                Some(Some(v)) if v.is_string() != 0 => {
-                    v8_to_string(v)
-                }
-                _ => String::new(),
-            };
-
             let context = match v8_context_get_current_context() {
                 Some(ctx) => ctx,
                 None => {
@@ -488,167 +467,94 @@ wrap_v8_handler! {
                 return 0;
             };
 
-            let promise = v8_value_create_promise().unwrap();
+            // Detect payload type from second argument
+            let is_binary = args.get(1)
+                .and_then(|v| v.as_ref())
+                .is_some_and(|v| v.is_array_buffer() != 0);
 
+            let cmd_header = encode_cmd_header(&cmd);
+            let promise = v8_value_create_promise().unwrap();
+            let promise_for_retval = promise.clone();
             let id = register_promise(context.clone(), promise.clone(), SUB_RPC);
 
-            debug!("[IPC Renderer] JS invoke: '{}' (id={})", cmd, id);
+            debug!("[IPC Renderer] JS invoke: '{}' (id={}, binary={})", cmd, id, is_binary);
 
-            let envelope = Envelope {
-                version: ENVELOPE_VERSION,
-                subsystem: SUB_RPC,
-                opcode: RPC_INVOKE,
-                flags: 0,
-                correlation_id: id as u32,
-                payload_kind: PAYLOAD_STRING,
-            };
+            if is_binary {
+                let buffer = args.get(1).unwrap().as_ref().unwrap();
+                let ptr = buffer.array_buffer_data();
+                let len = buffer.array_buffer_byte_length();
 
-            // Build parts separately to avoid intermediate Vec
-            let cmd_header = encode_cmd_header(&cmd);
-            let payload_bytes = payload.as_bytes();
-
-            if let Some(mut msg) = build_message_parts("kurogane_rpc", &envelope, &[&cmd_header, payload_bytes]) {
-                frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
-            } else {
-                if context.enter() == 0 {
+                if ptr.is_null() {
+                    if let Some(exc) = exception {
+                        *exc = CefString::from("ArrayBuffer has null data");
+                    }
                     registry().lock().unwrap().take(id);
                     return 0;
                 }
-                let reject_msg = CefString::from("-1: Failed to build IPC message");
-                promise.reject_promise(Some(&reject_msg));
-                context.exit();
-                registry().lock().unwrap().take(id);
-                if let Some(ret) = retval {
-                    *ret = Some(promise);
-                }
-                return 1;
-            }
 
-            if let Some(ret) = retval {
-                *ret = Some(promise);
-            }
+                let mut build_failed = false;
+                with_array_buffer(ptr as *const u8, len, |data| {
+                    let envelope = Envelope {
+                        version: ENVELOPE_VERSION,
+                        subsystem: SUB_RPC,
+                        opcode: RPC_INVOKE,
+                        flags: 0,
+                        correlation_id: id as u32,
+                        payload_kind: PAYLOAD_BINARY,
+                    };
 
-            1
-        }
-    }
-}
-
-//
-// Binary invoke handler
-//
-
-wrap_v8_handler! {
-    pub struct IpcInvokeBinaryHandler;
-
-    impl V8Handler {
-
-        fn execute(
-            &self,
-            _name: Option<&CefString>,
-            _object: Option<&mut V8Value>,
-            arguments: Option<&[Option<V8Value>]>,
-            retval: Option<&mut Option<V8Value>>,
-            exception: Option<&mut CefString>,
-        ) -> i32 {
-
-            let args = match arguments {
-                Some(a) if a.len() >= 2 => a,
-                _ => {
-                    if let Some(exc) = exception { *exc = CefString::from("invokeBinary(command, ArrayBuffer)"); }
-                    return 0;
-                }
-            };
-
-            let cmd = match args.first() {
-                Some(Some(v)) if v.is_string() != 0 => {
-                    v8_to_string(v)
-                }
-                _ => {
-                    if let Some(exc) = exception {
-                        *exc = CefString::from("command must be a string");
+                    if let Some(mut msg) = build_message_parts("kurogane_rpc", &envelope, &[&cmd_header, data]) {
+                        frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
+                    } else {
+                        build_failed = true;
+                        if let Some(ctx) = v8_context_get_current_context() {
+                            if ctx.enter() == 0 {
+                                registry().lock().unwrap().take(id);
+                                return;
+                            }
+                            let reject_msg = CefString::from("-1: Failed to build IPC message");
+                            promise.reject_promise(Some(&reject_msg));
+                            ctx.exit();
+                        }
+                        registry().lock().unwrap().take(id);
                     }
-                    return 0;
+                });
+
+                if build_failed {
+                    if let Some(ret) = retval { *ret = Some(promise_for_retval); }
+                    return 1;
                 }
-            };
-
-            // Accept ArrayBuffer only.
-            // Callers must pass data.buffer (not a Uint8Array view) enforced in the JS wrapper.
-            let buffer = match args.get(1) {
-                Some(Some(v)) if v.is_array_buffer() != 0 => v,
-                _ => {
-                    if let Some(exc) = exception {
-                        *exc = CefString::from("second argument must be an ArrayBuffer (use invokeBinary())");
-                    }
-                    return 0;
-                }
-            };
-
-            let ptr = buffer.array_buffer_data();
-            let len = buffer.array_buffer_byte_length();
-
-            if ptr.is_null() {
-                if let Some(exc) = exception {
-                    *exc = CefString::from("ArrayBuffer has null data");
-                }
-                return 0;
-            }
-
-            let context = match v8_context_get_current_context() {
-                Some(ctx) => ctx,
-                None => {
-                    if let Some(exc) = exception {
-                        *exc = CefString::from("invokeBinary: no active renderer context");
-                    }
-                    return 0;
-                }
-            };
-
-            let Some(frame) = context.frame() else {
-                if let Some(exc) = exception {
-                    *exc = CefString::from("invokeBinary: no frame for current context");
-                }
-                return 0;
-            };
-
-            let promise = v8_value_create_promise().unwrap();
-            let promise_for_retval = promise.clone();
-            let id = register_promise(context.clone(), promise.clone(), SUB_BINARY);
-
-            let mut build_failed = false;
-            with_array_buffer(ptr as *const u8, len, |data| {
-                let cmd_header = encode_cmd_header(&cmd);
+            } else {
+                let payload = match args.get(1) {
+                    Some(Some(v)) if v.is_string() != 0 => v8_to_string(v),
+                    _ => String::new(),
+                };
 
                 let envelope = Envelope {
                     version: ENVELOPE_VERSION,
-                    subsystem: SUB_BINARY,
-                    opcode: BINARY_INVOKE,
+                    subsystem: SUB_RPC,
+                    opcode: RPC_INVOKE,
                     flags: 0,
                     correlation_id: id as u32,
-                    payload_kind: PAYLOAD_BINARY,
+                    payload_kind: PAYLOAD_STRING,
                 };
 
-                if let Some(mut msg) = build_message_parts("kurogane_binary", &envelope, &[&cmd_header, data]) {
+                let payload_bytes = payload.as_bytes();
+
+                if let Some(mut msg) = build_message_parts("kurogane_rpc", &envelope, &[&cmd_header, payload_bytes]) {
                     frame.send_process_message(ProcessId::BROWSER, Some(&mut msg));
                 } else {
-                    build_failed = true;
-                    if let Some(ctx) = v8_context_get_current_context() {
-                        if ctx.enter() == 0 {
-                            registry().lock().unwrap().take(id);
-                            return;
-                        }
-                        let reject_msg = CefString::from("-1: Failed to build IPC message");
-                        promise.reject_promise(Some(&reject_msg));
-                        ctx.exit();
+                    if context.enter() == 0 {
+                        registry().lock().unwrap().take(id);
+                        return 0;
                     }
+                    let reject_msg = CefString::from("-1: Failed to build IPC message");
+                    promise.reject_promise(Some(&reject_msg));
+                    context.exit();
                     registry().lock().unwrap().take(id);
+                    if let Some(ret) = retval { *ret = Some(promise_for_retval); }
+                    return 1;
                 }
-            });
-
-            if build_failed {
-                if let Some(ret) = retval {
-                    *ret = Some(promise_for_retval);
-                }
-                return 1;
             }
 
             if let Some(ret) = retval {
@@ -699,7 +605,6 @@ wrap_v8_handler! {
             if let Some((ctx, promise, sub)) = cancel_promise(id) {
                 let opcode = match sub {
                     SUB_RPC => RPC_CANCEL,
-                    SUB_BINARY => BINARY_CANCEL,
                     SUB_STREAM => STREAM_CANCEL,
                     _ => RPC_CANCEL,
                 };

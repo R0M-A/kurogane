@@ -27,7 +27,6 @@ pub struct IpcRouter {
 pub fn route_renderer(frame: &mut Frame, envelope: &Envelope, payload: &[u8]) -> bool {
     match envelope.subsystem {
         SUB_RPC => crate::ipc::rpc::renderer::handle_rpc_renderer(frame, envelope, payload),
-        SUB_BINARY => crate::ipc::binary::renderer::handle_binary_renderer(frame, envelope, payload),
         SUB_EVENT => crate::ipc::event::renderer::handle_event_renderer(frame, envelope, payload),
         SUB_STREAM => crate::ipc::stream::renderer::handle_stream_renderer(frame, envelope, payload),
         _ => {
@@ -51,7 +50,7 @@ impl IpcRouter {
         ctx: IpcContext,
     ) -> bool {
         match envelope.subsystem {
-            SUB_RPC | SUB_BINARY => {
+            SUB_RPC => {
                 self.request_response.handle_browser(
                     frame,
                     envelope,

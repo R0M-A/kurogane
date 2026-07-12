@@ -22,23 +22,23 @@ for (let i = 0; i < 1_000; i++) await kurogane.invoke('echo', { i })
 }
 
 async function binaryBurst() {
-for (let i = 0; i < 1_000; i++) await kurogane.invokeBinary('echo_binary', PAYLOADS.burst)
+for (let i = 0; i < 1_000; i++) await kurogane.invoke('echo_binary', PAYLOADS.burst)
 }
 
 async function binaryMedium() {
-for (let i = 0; i < 100; i++) await kurogane.invokeBinary('echo_binary', PAYLOADS.medium)
+for (let i = 0; i < 100; i++) await kurogane.invoke('echo_binary', PAYLOADS.medium)
 }
 
 async function binaryBulk() {
-for (let i = 0; i < 100; i++) await kurogane.invokeBinary('echo_binary', PAYLOADS.bulk)
+for (let i = 0; i < 100; i++) await kurogane.invoke('echo_binary', PAYLOADS.bulk)
 }
 
 async function binaryHeavy() {
-for (let i = 0; i < 50; i++) await kurogane.invokeBinary('echo_binary', PAYLOADS.heavy)
+for (let i = 0; i < 50; i++) await kurogane.invoke('echo_binary', PAYLOADS.heavy)
 }
 
 async function binaryExtreme() {
-for (let i = 0; i < 100; i++) await kurogane.invokeBinary('echo_binary', PAYLOADS.extreme)
+for (let i = 0; i < 100; i++) await kurogane.invoke('echo_binary', PAYLOADS.extreme)
 }
 
 // Deterministic suite ordering for consistent comparisons

@@ -24,7 +24,6 @@ pub const ENVELOPE_SIZE: usize = 9;
 
 /// Protocol subsystem identifiers.
 pub const SUB_RPC: u8 = 0;
-pub const SUB_BINARY: u8 = 1;
 pub const SUB_EVENT: u8 = 2;
 pub const SUB_STREAM: u8 = 3;
 
@@ -33,12 +32,6 @@ pub const RPC_INVOKE: u8 = 0;
 pub const RPC_RESOLVE: u8 = 1;
 pub const RPC_REJECT: u8 = 2;
 pub const RPC_CANCEL: u8 = 3;
-
-/// Binary transfer protocol opcodes.
-pub const BINARY_INVOKE: u8 = 0;
-pub const BINARY_RESPONSE: u8 = 1;
-pub const BINARY_REJECT: u8 = 2;
-pub const BINARY_CANCEL: u8 = 3;
 
 /// Event protocol opcodes.
 /// Renderers subscribe to events. Browsers emit events to subscribed frames.
