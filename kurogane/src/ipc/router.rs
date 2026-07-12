@@ -80,6 +80,15 @@ impl IpcRouter {
         route_renderer(frame, envelope, payload)
     }
 
+    /// Clean up all state associated with invalid frames (post-navigation).
+    pub fn clear_for_frame(&self) {
+        let events = self.event.clear_for_frame();
+        let streams = self.stream.clear_for_frame();
+        if events + streams > 0 {
+            crate::debug!("[Router] cleaned up {} event subs, {} streams for invalid frames", events, streams);
+        }
+    }
+
     /// Cancel all pending async handlers for a given browser.
     pub fn cancel_all_for_browser(&self, browser_id: BrowserId) -> usize {
         let req_count = self.request_response.pending.cancel_all_for_browser(browser_id);

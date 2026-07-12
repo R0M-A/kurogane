@@ -144,6 +144,14 @@ impl StreamSubsystem {
         }
     }
 
+    /// Remove all streams whose frame is no longer valid.
+    pub fn clear_for_frame(&self) -> usize {
+        let mut streams = self.streams.lock().unwrap();
+        let before = streams.len();
+        streams.retain(|_, (_, _, frame)| frame.is_valid() != 0);
+        before - streams.len()
+    }
+
     /// Remove all streams for a given browser.
     pub fn clear_for_browser(&self, browser_id: BrowserId) -> usize {
         let mut streams = self.streams.lock().unwrap();

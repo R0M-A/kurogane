@@ -85,7 +85,9 @@ wrap_life_span_handler! {
 // LOAD HANDLER
 //
 wrap_load_handler! {
-    pub struct KuroganeLoadHandler;
+    pub struct KuroganeLoadHandler {
+        router: Arc<IpcRouter>,
+    }
 
     impl LoadHandler {
         fn on_load_start(
@@ -98,6 +100,7 @@ wrap_load_handler! {
                 let u: CefString = (&f.url()).into();
                 debug!("[LoadHandler] START {}", u.to_string());
             }
+            self.router.clear_for_frame();
         }
 
         fn on_load_end(
@@ -138,7 +141,7 @@ wrap_client! {
 
     impl Client {
         fn load_handler(&self) -> Option<LoadHandler> {
-            Some(KuroganeLoadHandler::new())
+            Some(KuroganeLoadHandler::new(self.services.router.clone()))
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {

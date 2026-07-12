@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use cef::Frame;
+use cef::{Frame, ImplFrame};
 
 use crate::browser_registry::BrowserId;
 
@@ -30,6 +30,25 @@ impl EventSubsystem {
         Self {
             subscriptions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Removes all subscriptions whose frame is no longer valid.
+    ///
+    /// Returns the number of subscriptions removed.
+    pub fn clear_for_frame(&self) -> usize {
+        let mut subs = self.subscriptions.lock().unwrap();
+        let mut total = 0;
+        subs.retain(|_, v| {
+            let before = v.len();
+            v.retain(|s| s.frame.is_valid() != 0);
+            let removed = before - v.len();
+            if removed > 0 {
+                crate::debug!("[EventSubsystem] removed {} subscription(s) with invalid frame", removed);
+            }
+            total += removed;
+            !v.is_empty()
+        });
+        total
     }
 
     /// Removes all subscriptions associated with a browser.
