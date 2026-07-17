@@ -36,14 +36,14 @@
      */
     async function invoke(command, payload) {
         if (payload instanceof ArrayBuffer) {
-            return window.core.invoke(command, payload).catch(toError);
+            return window.core.invoke(command, payload).catch(function(e) { throw toError(e); });
         }
         if (ArrayBuffer.isView(payload)) {
             const buffer = payload.buffer.slice(
                 payload.byteOffset,
                 payload.byteOffset + payload.byteLength,
             );
-            return window.core.invoke(command, buffer).catch(toError);
+            return window.core.invoke(command, buffer).catch(function(e) { throw toError(e); });
         }
         const json = payload !== undefined ? JSON.stringify(payload) : '';
         let result;
