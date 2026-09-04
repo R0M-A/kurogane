@@ -98,6 +98,11 @@
 
             nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.makeWrapper ];
 
+            # Fallback when git.user and git.email aren't set
+            preCheck = ''
+              export USER="Kurogane Tests"
+            '';
+
             # TODO: Avoid envvars
             postInstall = ''
               wrapProgram $out/bin/kurogane \
