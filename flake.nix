@@ -114,6 +114,20 @@
                 }:${cef} \
                 --prefix PKG_CONFIG_PATH : ${pkgs.lib.makeSearchPath "lib/pkgconfig" commonArgs.buildInputs}
             '';
+
+            meta = {
+              mainProgram = "kurogane";
+              description = "Composable Chromium runtime for Rust";
+              longDescription = ''
+                Kurogane is a Rust-native runtime built on [Chromium Embedded Framework (CEF)](https://en.wikipedia.org/wiki/Chromium_Embedded_Framework), bringing Chromium to desktop applications while giving you control over windowing, event loops and lifecycle when you need it.
+              '';
+              homepage = "https://github.com/0x48piraj/kurogane";
+              changelog = "https://github.com/0x48piraj/kurogane/releases";
+              license = pkgs.lib.licenses.mit;
+              sourceProvenance = pkgs.lib.sourceTypes.fromSource;
+              # maintainers = with lib.maintainers; [ 0x48piraj R0M-A ]; # TODO: get on maintainers list
+              platforms = pkgs.lib.platforms.x86_64;
+            };
           }
         );
       in
@@ -126,11 +140,13 @@
         apps.default = {
           type = "app";
           program = "${kurogane}/bin/kurogane";
+          meta = kurogane.meta;
         };
 
         devShells.default = craneLib.devShell {
           packages = [ kurogane ];
         };
+
       }
     );
 }
