@@ -9,7 +9,7 @@
 }:
 
 let
-  version = cefVersion;
+  version = "150.0.10";
   gitRevision = "8042e43";
   chromiumVersion = "150.0.7871.101";
 

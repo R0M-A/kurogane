@@ -15,8 +15,6 @@
         "aarch64-linux"
         "aarch64-darwin"
       ];
-
-      cefVersion = "150.0.10";
     in
     inputs.flake-utils.lib.eachSystem supportedSystems (
       system:
@@ -81,7 +79,7 @@
           ];
         };
 
-        cef = pkgs.callPackage ./nix/cef.nix { inherit cefVersion; };
+#         cef = pkgs.callPackage ./nix/cef.nix { inherit cefVersion; };
 
         cargoArtifacts = craneLib.vendorCargoDeps (commonArgs // { pname = "kuroganeDeps"; });
         crateInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
@@ -175,7 +173,6 @@
 
           # Reuse the Nix store CEF instead of letting cef-dll-sys re-download
           env.CEF_PATH = cef;
-          env.KUROGANE_CEF_VERSION = cefVersion;
         };
 
         checks = pkgs.lib.mergeAttrsList [
