@@ -19,82 +19,41 @@
     inputs.flake-utils.lib.eachSystem supportedSystems (
       system:
       let
-
         pkgs = import nixpkgs { inherit system; };
         craneLib = inputs.crane.mkLib pkgs;
 
+        kuroganePackage = pkgs.callPackage ./nix/package.nix { };
+        cef = kuroganePackage.cef;
+
         commonArgs = {
           src = craneLib.cleanCargoSource ./.;
-
-          strictDeps = true;
-
-          buildInputs =
-            with pkgs;
-            [
-              openssl
-              nss
-              nspr
-              pango
-              cairo
-              glib
-              expat
-              fontconfig
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              dbus
-              at-spi2-core
-              libGL
-              libxkbcommon
-              wayland
-              libX11
-              libXcomposite
-              libXcursor
-              libXdamage
-              libXext
-              libXfixes
-              libXi
-              libXrandr
-              libXrender
-              libXScrnSaver
-              libXtst
-              libxcb
-              gtk3
-              alsa-lib
-              at-spi2-atk
-              atk
-              cups
-              gdk-pixbuf
-              libva
-              libgbm
-              libvdpau
-              systemd
-            ];
-
+          inherit (kuroganePackage)
+            buildInputs
+            strictDeps
+            meta
+            pname
+            ;
+          # Can't inherit nativeBuildInputs because of cargo/rustc collision
           nativeBuildInputs = with pkgs; [
-            rustc
-            cargo
             pkg-config
+            makeWrapper
             cmake
-            ninja
           ];
+
+          cargoExtraArgs = "-p kurogane-cli";
+
+          USER = "Kurogane Tests"; # Fallback when git.user and git.email aren't set
+          CEF_PATH = cef; # Don't download cef
         };
 
-#         cef = pkgs.callPackage ./nix/cef.nix { inherit cefVersion; };
-
-        cargoArtifacts = craneLib.vendorCargoDeps (commonArgs // { pname = "kuroganeDeps"; });
-        crateInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         kurogane = craneLib.buildPackage (
           commonArgs
           // {
             inherit cargoArtifacts;
-
             pname = "kurogane";
-            version = crateInfo.version;
-
-            cargoExtraArgs = "-p kurogane-cli";
-
-            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.makeWrapper ];
+            version = "dev";
 
             postInstall = ''
               wrapProgram $out/bin/kurogane \
@@ -105,54 +64,13 @@
                 }:${cef} \
                 --prefix PKG_CONFIG_PATH : ${pkgs.lib.makeSearchPath "lib/pkgconfig" commonArgs.buildInputs}
             '';
-
-            meta = {
-              description = "Composable Chromium runtime for Rust";
-              longDescription = ''
-                Kurogane is a Rust-native runtime built on [Chromium Embedded Framework (CEF)](https://en.wikipedia.org/wiki/Chromium_Embedded_Framework), bringing Chromium to desktop applications while giving you control over windowing, event loops and lifecycle when you need it.
-              '';
-              homepage = "https://github.com/0x48piraj/kurogane";
-              changelog = "https://github.com/0x48piraj/kurogane/releases";
-              # Mirrors the allow-list in cargo-deny
-              license = with pkgs.lib.licenses; [
-                asl20
-                llvm-exception
-                bsd2
-                bsd3
-                isc
-                mit
-                zlib
-                mpl20
-                cc0
-                ofl
-                unicode-30
-                bzip2
-                {
-                  free = true;
-                  shortName = "LicenseRef-UFL-1.0";
-                }
-                {
-                  free = true;
-                  shortName = "CDLA-Permissive-2.0";
-                }
-              ];
-              sourceProvenance =
-                with pkgs.lib.sourceTypes;
-                [ fromSource ] ++ pkgs.cef-binary.meta.sourceProvenance; # cef is binaryNativeCode
-              # maintainers = with pkgs.lib.maintainers; [ _0x48piraj R0M-A ]; # TODO: get on maintainers list
-              platforms = supportedSystems;
-              mainProgram = "kurogane";
-            };
           }
         );
-
-        testTemplates = import ./nix/testTemplates.nix { inherit pkgs kurogane; };
-
       in
       {
         packages = {
           default = kurogane;
-          kurogane = kurogane;
+          inherit kurogane kuroganePackage; # kuroganePackage is debug-only
         };
 
         apps.default = {
@@ -172,11 +90,11 @@
           ];
 
           # Reuse the Nix store CEF instead of letting cef-dll-sys re-download
-          env.CEF_PATH = cef;
+          CEF_PATH = cef;
         };
 
         checks = pkgs.lib.mergeAttrsList [
-          testTemplates
+          (import ./nix/testTemplates.nix { inherit pkgs kurogane; })
         ];
       }
     );
