@@ -3,7 +3,6 @@
   stdenv,
   fetchurl,
   cef-binary,
-  cefVersion,
   symlinkJoin,
   writeTextFile,
 }:
@@ -66,14 +65,14 @@ let
     destination = "/archive.json";
     text = builtins.toJSON {
       type = "minimal";
-      name = "cef_binary_${cefVersion}+g${gitRevision}+chromium-${chromiumVersion}_${platform}_minimal.tar.bz2";
+      name = "cef_binary_${version}+g${gitRevision}+chromium-${chromiumVersion}_${platform}_minimal.tar.bz2";
       sha1 = lib.fakeHash;
     };
   };
 in
 symlinkJoin {
-  name = "cef-with-archive-${cefVersion}";
-
+  pname = "cef-with-archive";
+  inherit version;
   paths = [
     cef
     archiveJson
