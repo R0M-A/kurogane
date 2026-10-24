@@ -3,14 +3,13 @@
   stdenv,
   fetchurl,
   cef-binary,
-  cefVersion,
   linkFarm,
   symlinkJoin,
   writeTextFile,
 }:
 
 let
-  version = cefVersion;
+  version = "154.0.33";
   gitRevision = "a03e714";
   chromiumVersion = "154.0.8037.94";
 
@@ -62,34 +61,17 @@ let
         '';
       }
     else
-      (cef-binary.override {
+      cef-binary.override {
         inherit version gitRevision chromiumVersion;
 
         srcHashes = {
           aarch64-linux = "sha256-zQ8IkqjCF7Z2DfafhZs70jFY/Kob7jXFWYpBxuCHiJk=";
           x86_64-linux = "sha256-zYnjZgVdRBKUL6JTNKn8mKW2n/Wwq/YgnJTi2eOABaI=";
         };
-      }).overrideAttrs
-        (old: {
-          # CEF 154 bundles ANGLE in libcef.so; patch only libraries present in the archive
-          # Goes away when https://github.com/NixOS/nixpkgs/pull/571896 lands
-          installPhase = lib.concatMapStringsSep "\n" (
-            line:
-            let
-              name = lib.findFirst (name: lib.hasInfix "/${name}" line) null [
-                "libEGL.so"
-                "libGLESv2.so"
-              ];
-            in
-            if name != null && lib.hasPrefix "patchelf" (lib.trim line) then
-              "[ ! -e ${old.passthru.buildType}/${name} ] || ${line}"
-            else
-              line
-          ) (lib.splitString "\n" old.installPhase);
-        });
+      };
 
   # CEF's license and credits which every bundle carries
-  notices = linkFarm "cef-notices-${cefVersion}" (
+  notices = linkFarm "cef-notices-${version}" (
     lib.genAttrs [ "LICENSE.txt" "CREDITS.html" ] (name: "${cef}/${name}")
   );
 
@@ -98,23 +80,21 @@ let
     destination = "/archive.json";
     text = builtins.toJSON {
       type = "minimal";
-      name = "cef_binary_${cefVersion}+g${gitRevision}+chromium-${chromiumVersion}_${platform}_minimal.tar.bz2";
+      name = "cef_binary_${version}+g${gitRevision}+chromium-${chromiumVersion}_${platform}_minimal.tar.bz2";
       inherit sha1;
     };
   };
 in
-# Bundle the runtime, notices and build metadata
 symlinkJoin {
-  name = "cef-with-archive-${cefVersion}";
+  pname = "cef-with-archive";
+  inherit version;
 
   paths = [
     "${cef}/Release"
-  ]
-  ++ lib.optional (!stdenv.hostPlatform.isDarwin) "${cef}/Resources"
-  ++ [
-    notices
     archiveJson
-  ];
+    notices
+  ]
+  ++ lib.optional (!stdenv.hostPlatform.isDarwin) "${cef}/Resources";
 
   # Verifies the pinned archive against its declared SHA-1
   passthru.tests.cef-archive-sha1 = fetchurl {
