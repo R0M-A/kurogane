@@ -38,7 +38,7 @@ let
 
   system = stdenv.hostPlatform.system;
   platform = platforms.${system} or (throw "Missing platform for system: ${system}");
-  sha1 = sha1Hashes.${system} or (throw "Missing sha1 for system: ${system}");
+  sha1 = sha1Hashes.${system} or (throw "Missing CEF source sha1 for system: ${system}");
 
   cef =
     if stdenv.hostPlatform.isDarwin then
@@ -91,6 +91,8 @@ symlinkJoin {
     notices
   ]
   ++ lib.optional (!stdenv.hostPlatform.isDarwin) "${cef}/Resources";
+
+  inherit (kurogane-nixpkgs.cef-binary) meta;
 
   # Verifies the pinned archive against its declared SHA-1
   passthru.tests.cef-archive-sha1 = fetchurl {
