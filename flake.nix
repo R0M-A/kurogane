@@ -28,11 +28,10 @@
           version = "dev";
           cargoExtraArgs = "-p kurogane-cli";
 
-          # rustc and cargo conflict with craneLib's own rustc and cargo
-          nativeBuildInputs = pkgs.lib.subtractLists [ pkgs.rustc pkgs.cargo ] kurogane.nativeBuildInputs;
           inherit (kurogane)
             pname
             buildInputs
+            nativeBuildInputs
             strictDeps
             USER
             CEF_PATH

@@ -2,8 +2,6 @@
   lib,
   stdenv,
   rustPlatform,
-  rustc,
-  cargo,
   openssl,
   dbus,
   at-spi2-core,
@@ -109,8 +107,6 @@ let
   ];
 
   nativeBuildInputs = [
-    rustc
-    cargo
     pkg-config
     stdenv.cc
     makeWrapper
@@ -186,7 +182,7 @@ rustPlatform.buildRustPackage {
         redistributable = true;
       }
     ];
-    sourceProvenance = with lib.sourceTypes; [ fromSource ] ++ cef-binary.meta.sourceProvenance; # cef is binaryNativeCode
+    sourceProvenance = with lib.sourceTypes; [ fromSource binaryNativeCode ]; # cef is binaryNativeCode
     maintainers = with lib.maintainers; [
       _0x48piraj
       R0M-A
