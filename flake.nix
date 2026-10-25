@@ -80,8 +80,8 @@
         checks = pkgs.lib.mergeAttrsList [
           {
             inherit kurogane-dev;
-            bundle-fixture = import ./nix/bundleFixture.nix {
-              inherit pkgs craneLib kurogane;
+            bundle-fixture = pkgs.callPackage ./nix/bundleFixture.nix {
+              inherit craneLib kurogane;
               src = ./.;
             };
           }
