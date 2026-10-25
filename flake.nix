@@ -11,14 +11,11 @@
 
   outputs =
     { self, nixpkgs, ... }@inputs:
-    let
-      supportedSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
-    in
-    inputs.flake-utils.lib.eachSystem supportedSystems (
+
+    # While we only support platforms defined in kurogane.meta.platforms,
+    # we expose other systems for developing and for users who want to
+    # have fun on exotic systems
+    inputs.flake-utils.lib.eachSystem nixpkgs.lib.systems.flakeExposed (
       system:
       let
         pkgs = import nixpkgs { inherit system; };
