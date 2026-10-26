@@ -63,7 +63,6 @@
         devShells.default = pkgs.mkShell {
           inputsFrom = [ kurogane-dev ];
           packages = with pkgs; [
-            kurogane-dev
             rustc
             cargo
             clippy
